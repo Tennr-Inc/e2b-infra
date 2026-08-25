@@ -45,6 +45,15 @@ tf_vars := AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) \
 	$(call tfvar, CLICKHOUSE_CLUSTER_SIZE) \
 	$(call tfvar, REDIS_INSTANCE_TYPE) \
 	$(call tfvar, REDIS_MANAGED) \
+	$(call tfvar, REDIS_REPLICA_SIZE) \
+	$(call tfvar, POSTGRES_ENGINE_VERSION) \
+	$(call tfvar, POSTGRES_INSTANCE_CLASS) \
+	$(call tfvar, POSTGRES_ALLOCATED_STORAGE) \
+	$(call tfvar, POSTGRES_MAX_ALLOCATED_STORAGE) \
+	$(call tfvar, POSTGRES_MULTI_AZ) \
+	$(call tfvar, POSTGRES_BACKUP_RETENTION_PERIOD) \
+	$(call tfvar, POSTGRES_DELETION_PROTECTION) \
+	$(call tfvar, POSTGRES_SKIP_FINAL_SNAPSHOT) \
 	$(call tfvar, DOCKER_REVERSE_PROXY_ENABLED) \
 	$(call tfvar, API_CLUSTER_SIZE) \
 	$(call tfvar, API_INTERNAL_GRPC_PORT) \

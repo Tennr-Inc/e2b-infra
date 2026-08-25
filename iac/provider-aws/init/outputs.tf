@@ -91,6 +91,11 @@ output "vpc_elasticache_subnet_group_name" {
   value = module.network.elasticache_subnet_group_name
 }
 
+output "vpc_data_subnet_ids" {
+  description = "Isolated subnet IDs for managed data services"
+  value       = module.network.elasticache_subnet_ids
+}
+
 output "vpc_instance_connect_security_group_id" {
   value = module.network.instance_connect_security_group_id
 }

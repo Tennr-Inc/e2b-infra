@@ -29,7 +29,7 @@
 **Accounts**
 
 - Cloudflare account and domain (GCP only)
-- PostgreSQL database
+- PostgreSQL database (GCP; the AWS configuration below provisions private RDS)
 
 **Optional**
 
@@ -133,10 +133,8 @@ Now, you should see the right quota options in `All Quotas` and be able to reque
     - Dedicated VPC, private workload subnets, NAT subnets, endpoints, and optional VPC peering
     - ECR repositories for container images
     - S3 buckets for templates, kernels, builds, and backups
-    - Secrets in AWS Secrets Manager (with placeholder values)
-    - Internal Application Load Balancer and private Route53 wildcard DNS
+    - Secrets in AWS Secrets Manager (with placeholder values for optional integrations)
 5. Update the following secrets in [AWS Secrets Manager](https://console.aws.amazon.com/secretsmanager) with actual values:
-    - `{prefix}postgres-connection-string` - your PostgreSQL connection string (**required**)
     - `{prefix}grafana` - JSON with `API_KEY`, `OTLP_URL`, `OTEL_COLLECTOR_TOKEN`, `USERNAME` keys (optional, for monitoring)
     - `{prefix}launch-darkly-api-key` - LaunchDarkly SDK key (optional, for feature flags)
 6. Build the Packer AMI for cluster nodes (a single shared AMI used by all node types):
@@ -147,7 +145,9 @@ Now, you should see the right quota options in `All Quotas` and be able to reque
     ```
 7. Run `make build-and-upload` to build and push container images and binaries
 8. Run `make copy-public-builds` to copy kernels, Firecracker versions, and busybox to your S3 buckets
-9. Run `make plan-without-jobs` and then `make apply` to provision the cluster infrastructure
+9. Run `make plan-without-jobs` and then `make apply` to provision the cluster infrastructure,
+   private RDS PostgreSQL, managed Valkey when enabled, the internal ALB, and private DNS. Terraform
+   writes the generated PostgreSQL connection string to `{prefix}postgres-connection-string`.
 10. Run `make plan` and then `make apply` to deploy all Nomad jobs (this also runs database migrations automatically via the API's db-migrator task)
 11. Setup data in the cluster by running `make prep-cluster` to create an initial user, team, and build a base template
 
@@ -167,8 +167,15 @@ associates the private zone with the peer VPC.
 - **Build** - Template manager for building sandbox templates (default: `m8i.2xlarge`)
 - **ClickHouse** - Analytics database (default: `t3.xlarge`)
 
-**Managed Services (optional):**
-- ElastiCache Redis (set `REDIS_MANAGED=true`)
+**Managed data services:**
+- RDS PostgreSQL in isolated data subnets, encrypted at rest, TLS required by clients, with seven
+  days of backups and deletion protection by default
+- ElastiCache Valkey (set `REDIS_MANAGED=true`), encrypted at rest and in transit with Multi-AZ
+  automatic failover and seven days of snapshots
+
+Both security groups accept connections only from the E2B cluster-node security group. Neither
+service is publicly accessible. The generated PostgreSQL password and connection string are
+Terraform-sensitive values; the connection string is also stored in AWS Secrets Manager.
 
 Sandbox RFC1918 access remains blocked unless `ALLOW_SANDBOX_INTERNAL_CIDRS` is explicitly set.
 Do not set it to the peer VPC CIDR. Use only narrow gateway endpoint CIDRs because the exception

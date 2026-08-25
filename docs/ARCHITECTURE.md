@@ -484,6 +484,13 @@ remain denied unless operators populate `ALLOW_SANDBOX_INTERNAL_CIDRS`; any such
 all sandboxes on that orchestrator fleet and must therefore identify only a dedicated, authenticated
 gateway endpoint rather than the peer VPC.
 
+The AWS data plane uses an encrypted, private RDS PostgreSQL instance and, when
+`REDIS_MANAGED=true`, an encrypted Multi-AZ ElastiCache Valkey replication group. Both live in
+isolated data subnets and accept traffic only from the E2B cluster-node security group. Terraform
+generates the PostgreSQL credentials, requires TLS in the connection string consumed by the Nomad
+jobs, and writes that string to AWS Secrets Manager. It does not expose either datastore through
+the ALB or the peering CIDR.
+
 - **Server nodes** run only Nomad/Consul servers (scheduling, service discovery, Consul DNS —
   services address each other as `*.service.consul`).
 - **API nodes** host every control-plane container and are the only LB backend.
@@ -492,8 +499,9 @@ gateway endpoint rather than the peer VPC.
   template caches. Autoscaled.
 - **Build nodes** run the same binary in template-manager mode; the `nomad-nodepool-apm`
   autoscaler plugin scales the job with the node pool.
-- PostgreSQL is external (connection string via secrets); Redis runs as a Nomad job or as a
-  managed service; ClickHouse runs on its own pool.
+- On AWS, PostgreSQL runs in private RDS and Redis runs as a Nomad job or private managed Valkey;
+  other providers can supply an external PostgreSQL connection string. ClickHouse runs on its own
+  pool.
 - Observability: everything exports OTel; the collector fans out to ClickHouse (product metrics)
   and Grafana Cloud/stack. Logs default to the legacy Vector → Loki path; dynamic log routing can
   select a primary collector and shadow collectors, and local-cluster log reads can be switched to

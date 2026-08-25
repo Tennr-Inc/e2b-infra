@@ -156,6 +156,52 @@ variable "redis_instance_type" {
 variable "redis_replica_size" {
   type    = number
   default = 2
+
+  validation {
+    condition     = var.redis_replica_size >= 2
+    error_message = "Managed Redis requires at least two nodes for automatic failover."
+  }
+}
+
+variable "postgres_engine_version" {
+  type        = string
+  description = "Pinned PostgreSQL engine version"
+  default     = "16.11"
+}
+
+variable "postgres_instance_class" {
+  type    = string
+  default = "db.t4g.small"
+}
+
+variable "postgres_allocated_storage" {
+  type    = number
+  default = 20
+}
+
+variable "postgres_max_allocated_storage" {
+  type    = number
+  default = 100
+}
+
+variable "postgres_multi_az" {
+  type    = bool
+  default = false
+}
+
+variable "postgres_backup_retention_period" {
+  type    = number
+  default = 7
+}
+
+variable "postgres_deletion_protection" {
+  type    = bool
+  default = true
+}
+
+variable "postgres_skip_final_snapshot" {
+  type    = bool
+  default = false
 }
 
 variable "api_cluster_size" {

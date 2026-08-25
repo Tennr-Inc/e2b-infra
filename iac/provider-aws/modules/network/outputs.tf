@@ -23,6 +23,11 @@ output "elasticache_subnet_group_name" {
   value = module.vpc.elasticache_subnet_group_name
 }
 
+output "elasticache_subnet_ids" {
+  description = "Isolated data subnet IDs used by managed Redis and PostgreSQL"
+  value       = module.vpc.elasticache_subnets
+}
+
 output "instance_connect_security_group_id" {
   description = "The security group ID for instance connect endpoints (if enabled)"
   value       = var.use_instance_connect ? aws_security_group.connect_endpoint[0].id : null
