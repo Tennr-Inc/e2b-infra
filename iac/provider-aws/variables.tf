@@ -151,7 +151,7 @@ variable "redis_managed" {
 
 variable "redis_instance_type" {
   type    = string
-  default = "cache.t2.small"
+  default = "cache.t4g.small"
 }
 
 variable "redis_replica_size" {
