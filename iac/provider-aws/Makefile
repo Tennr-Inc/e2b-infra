@@ -26,7 +26,19 @@ tf_vars := AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) \
 	TF_VAR_environment=$(TERRAFORM_ENVIRONMENT) \
 	$(call tfvar, PREFIX) \
 	$(call tfvar, DOMAIN_NAME) \
+	$(call tfvar, INGRESS_CERTIFICATE_ARN) \
+	$(call tfvar, INGRESS_ALLOWED_CIDR_BLOCKS) \
+	$(call tfvar, ENABLE_ALB_DELETION_PROTECTION) \
 	$(call tfvar, BUCKET_PREFIX) \
+	$(call tfvar, VPC_CIDR) \
+	$(call tfvar, VPC_AVAILABILITY_ZONES) \
+	$(call tfvar, VPC_PUBLIC_SUBNETS) \
+	$(call tfvar, VPC_PRIVATE_SUBNETS) \
+	$(call tfvar, VPC_ELASTICACHE_SUBNETS) \
+	$(call tfvar, USE_INSTANCE_CONNECT) \
+	$(call tfvar, PEER_VPC_ID) \
+	$(call tfvar, PEER_VPC_CIDR) \
+	$(call tfvar, PEER_ROUTE_TABLE_IDS) \
 	$(call tfvar, CLIENT_CLUSTER_SIZE) \
 	$(call tfvar, CLIENT_SERVER_MACHINE_TYPE) \
 	$(call tfvar, CLIENT_SERVER_NESTED_VIRTUALIZATION) \
@@ -55,15 +67,23 @@ tf_vars := AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) \
 	$(call tfvar, ALLOW_SANDBOX_INTERNAL_CIDRS)
 
 .PHONY: provider-login
-provider-login:
+provider-login: verify-account
 	aws ecr get-login-password --region $(AWS_REGION) --profile $(AWS_PROFILE) | docker login --username AWS --password-stdin $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
 
+.PHONY: verify-account
+verify-account:
+	@test -n "$(AWS_ACCOUNT_ID)" || (echo "AWS_ACCOUNT_ID is required" && exit 1)
+	@test -n "$(AWS_PROFILE)" || (echo "AWS_PROFILE is required" && exit 1)
+	@actual_account=$$(aws sts get-caller-identity --profile "$(AWS_PROFILE)" --query Account --output text); \
+		test "$$actual_account" = "$(AWS_ACCOUNT_ID)" || \
+		(echo "Refusing to continue: AWS profile $(AWS_PROFILE) resolves to $$actual_account, expected $(AWS_ACCOUNT_ID)" && exit 1)
+
 .PHONY: switch
-switch:
+switch: verify-account
 	$(tf_vars) $(TF) init -input=false -upgrade -reconfigure -backend-config="bucket=$(TERRAFORM_STATE_BUCKET)"
 
 .PHONY: init
-init:
+init: verify-account
 	# Create S3 bucket for Terraform state if it doesn't exist
 	# us-east-1 requires omitting LocationConstraint; all other regions require it
 	@if [ "$(TEMPLATE_BUCKET_LOCATION)" = "us-east-1" ]; then \
@@ -71,11 +91,14 @@ init:
 	else \
 		aws s3api create-bucket --bucket $(TERRAFORM_STATE_BUCKET) --region $(TEMPLATE_BUCKET_LOCATION) --profile $(AWS_PROFILE) --create-bucket-configuration LocationConstraint=$(TEMPLATE_BUCKET_LOCATION) 2>/dev/null || true; \
 	fi
+	aws s3api put-public-access-block --bucket $(TERRAFORM_STATE_BUCKET) --profile $(AWS_PROFILE) --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+	aws s3api put-bucket-encryption --bucket $(TERRAFORM_STATE_BUCKET) --profile $(AWS_PROFILE) --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+	aws s3api put-bucket-versioning --bucket $(TERRAFORM_STATE_BUCKET) --profile $(AWS_PROFILE) --versioning-configuration Status=Enabled
 	$(tf_vars) $(TF) init -upgrade -reconfigure -backend-config="bucket=${TERRAFORM_STATE_BUCKET}"
 	$(tf_vars) $(TF) apply -target=module.init -input=false -compact-warnings
 
 .PHONY: plan
-plan:
+plan: verify-account
 	@ printf "Planning Terraform for env: `tput setaf 2``tput bold`$(ENV)`tput sgr0`\n\n"
 	@ $(call tf_fmt)
 	@ $(tf_vars) $(TF) plan $(TF_VAR_FILE_ARG) -out=.tfplan.$(ENV) -input=false -compact-warnings -parallelism=20
@@ -83,19 +106,19 @@ plan:
 plan_only_jobs_moved_targets = -target="random_password.volume_token_key" -target="module.nomad.random_password.volume_token_key"
 
 .PHONY: plan-only-jobs
-plan-only-jobs:
+plan-only-jobs: verify-account
 	@ printf "Planning Terraform for env: `tput setaf 2``tput bold`$(ENV)`tput sgr0`\n\n"
 	$(call tf_fmt)
 	@ $(tf_vars) $(TF) plan $(TF_VAR_FILE_ARG) -out=.tfplan.$(ENV) -input=false -compact-warnings -parallelism=20 -target=module.nomad $(plan_only_jobs_moved_targets)
 
 .PHONY: plan-without-jobs
-plan-without-jobs:
+plan-without-jobs: verify-account
 	@ printf "Planning Terraform for env: `tput setaf 2``tput bold`$(ENV)`tput sgr0`\n\n"
 	$(eval TARGET := $(shell cat main.tf | grep "^module" | awk '{print $$2}' | tr ' ' '\n' | grep -v -e "nomad" | awk '{print "-target=module." $$0 ""}' | xargs))
 	@ $(tf_vars) $(TF) plan $(TF_VAR_FILE_ARG) -out=.tfplan.$(ENV) -input=false -compact-warnings -parallelism=20 $(TARGET)
 
 .PHONY: apply
-apply:
+apply: verify-account
 	@ printf "Applying Terraform for env: `tput setaf 2``tput bold`$(ENV)`tput sgr0`\n\n"
 	@ $(tf_vars) $(TF) apply -auto-approve -input=false -compact-warnings -parallelism=20 .tfplan.$(ENV)
 
@@ -105,7 +128,7 @@ state-migrate:
 	@ $(tf_vars) $(TF) state mv 'module.nomad.random_password.volume_token_key' 'random_password.volume_token_key' || true
 
 .PHONY: apply-init
-apply-init:
+apply-init: verify-account
 	@ $(tf_vars) $(TF) apply $(TF_VAR_FILE_ARG) -target=module.init -auto-approve -input=false -compact-warnings
 
 .PHONY: move

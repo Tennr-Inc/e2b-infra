@@ -472,6 +472,18 @@ flowchart TB
     NS -.->|schedules jobs| apipool & clientpool & buildpool & chpool
 ```
 
+The private AWS deployment places this topology in a dedicated VPC. Its Application Load Balancer
+is internal, listens only on HTTPS, and is addressed through a Route53 private hosted zone. A
+same-account, same-region VPC peering connection provides the application path; both VPC route
+tables are explicit Terraform inputs. The private zone is associated with the peer VPC, so the
+API, Nomad, and sandbox wildcard names have no public routing records. Public subnets exist only
+to host the NAT gateway used for outbound traffic from private E2B nodes and sandboxes.
+
+The peering route is host connectivity, not a sandbox firewall exception. Sandbox RFC1918 ranges
+remain denied unless operators populate `ALLOW_SANDBOX_INTERNAL_CIDRS`; any such entry applies to
+all sandboxes on that orchestrator fleet and must therefore identify only a dedicated, authenticated
+gateway endpoint rather than the peer VPC.
+
 - **Server nodes** run only Nomad/Consul servers (scheduling, service discovery, Consul DNS —
   services address each other as `*.service.consul`).
 - **API nodes** host every control-plane container and are the only LB backend.
