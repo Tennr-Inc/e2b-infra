@@ -484,6 +484,13 @@ remain denied unless operators populate `ALLOW_SANDBOX_INTERNAL_CIDRS`; any such
 all sandboxes on that orchestrator fleet and must therefore identify only a dedicated, authenticated
 gateway endpoint rather than the peer VPC.
 
+Public sandbox egress remains available through NAT unless the sandbox create/update network config
+supplies an `allowOut` list or denies all internet access. Domain allowlists are per sandbox, not a
+template or Terraform default. An internal destination must pass both the per-sandbox domain/CIDR
+policy and the fleet-wide `ALLOW_SANDBOX_INTERNAL_CIDRS` exception. The exception should therefore
+cover only a narrow, authenticated gateway CIDR. VPC peering is non-transitive, so VPN or transit
+gateway connectivity attached only to the peer VPC does not become an administrative path to E2B.
+
 The AWS data plane uses an encrypted, private RDS PostgreSQL instance and, when
 `REDIS_MANAGED=true`, an encrypted Multi-AZ ElastiCache Valkey replication group. Both live in
 isolated data subnets and accept traffic only from the E2B cluster-node security group. Terraform

@@ -110,6 +110,19 @@ run "managed_redis_topology" {
   }
 }
 
+run "managed_certificate" {
+  command = plan
+
+  variables {
+    ingress_certificate_arn = ""
+  }
+
+  assert {
+    condition     = aws_acm_certificate.ingress[0].domain_name == "*.e2b.staging.internal.example.com" && aws_acm_certificate.ingress[0].validation_method == "DNS"
+    error_message = "Terraform-managed ingress certificates must use DNS validation for the private wildcard domain."
+  }
+}
+
 run "reject_public_ingress" {
   command = plan
 
