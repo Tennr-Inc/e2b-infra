@@ -91,6 +91,7 @@ locals {
   loki_port             = 3100
   logs_proxy_port       = 30006
   otel_collector_port   = 4317
+  postgres_port         = 5432
 
   auth_provider_config = {
     jwt = []
@@ -127,10 +128,10 @@ locals {
     SANDBOX_ACCESS_TOKEN_HASH_SEED = module.init.sandbox_access_token_hash_seed
     AUTH_PROVIDER_CONFIG           = replace(jsonencode(local.auth_provider_config), "\"", "\\\"")
 
-    POSTGRES_CONNECTION_STRING   = module.init.postgres_connection_string
+    POSTGRES_CONNECTION_STRING   = module.postgres.connection_string
     DB_MAX_OPEN_CONNECTIONS      = tostring(var.db_max_open_connections)
     DB_MIN_IDLE_CONNECTIONS      = tostring(var.db_min_idle_connections)
-    AUTH_DB_CONNECTION_STRING    = module.init.postgres_connection_string
+    AUTH_DB_CONNECTION_STRING    = module.postgres.connection_string
     AUTH_DB_MAX_OPEN_CONNECTIONS = tostring(var.auth_db_max_open_connections)
     AUTH_DB_MIN_IDLE_CONNECTIONS = tostring(var.auth_db_min_idle_connections)
 
@@ -158,7 +159,7 @@ locals {
   }, var.api_env_vars)
 
   api_db_migrator_env_vars = merge({
-    POSTGRES_CONNECTION_STRING = module.init.postgres_connection_string
+    POSTGRES_CONNECTION_STRING = module.postgres.connection_string
   }, var.api_db_migrator_env_vars)
 
   client_proxy_env_vars = merge({
@@ -236,6 +237,29 @@ module "redis" {
   port          = local.redis_port
   instance_type = var.redis_instance_type
   replica_size  = var.redis_replica_size
+  ingress_security_group_ids = [
+    aws_security_group.cluster_node.id
+  ]
+}
+
+module "postgres" {
+  source = "./modules/postgres"
+
+  prefix                      = var.prefix
+  vpc_id                      = module.init.vpc_id
+  subnet_ids                  = module.init.vpc_data_subnet_ids
+  connection_string_secret_id = module.init.postgres_connection_string_secret_id
+
+  port                    = local.postgres_port
+  engine_version          = var.postgres_engine_version
+  instance_class          = var.postgres_instance_class
+  allocated_storage       = var.postgres_allocated_storage
+  max_allocated_storage   = var.postgres_max_allocated_storage
+  multi_az                = var.postgres_multi_az
+  backup_retention_period = var.postgres_backup_retention_period
+  deletion_protection     = var.postgres_deletion_protection
+  skip_final_snapshot     = var.postgres_skip_final_snapshot
+
   ingress_security_group_ids = [
     aws_security_group.cluster_node.id
   ]

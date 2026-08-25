@@ -156,28 +156,12 @@ resource "aws_secretsmanager_secret" "postgres_connection_string" {
   name = "${var.prefix}postgres-connection-string"
 }
 
-resource "aws_secretsmanager_secret_version" "postgres_connection_string" {
-  secret_id     = aws_secretsmanager_secret.postgres_connection_string.id
-  secret_string = " "
-
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
-data "aws_secretsmanager_secret_version" "postgres_connection_string" {
-  secret_id     = aws_secretsmanager_secret.postgres_connection_string.id
-  version_stage = "AWSCURRENT"
-  depends_on    = [aws_secretsmanager_secret_version.postgres_connection_string]
-}
-
 output "postgres_connection_string_secret_name" {
   value = aws_secretsmanager_secret.postgres_connection_string.name
 }
 
-output "postgres_connection_string" {
-  value     = data.aws_secretsmanager_secret_version.postgres_connection_string.secret_string
-  sensitive = true
+output "postgres_connection_string_secret_id" {
+  value = aws_secretsmanager_secret.postgres_connection_string.id
 }
 
 // ---

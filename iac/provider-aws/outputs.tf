@@ -17,3 +17,18 @@ output "vpc_peering_connection_id" {
   description = "VPC peering connection ID, or null when peering is disabled"
   value       = local.peering_enabled ? aws_vpc_peering_connection.peer[0].id : null
 }
+
+output "postgres_endpoint" {
+  description = "Private RDS PostgreSQL endpoint"
+  value       = module.postgres.endpoint
+}
+
+output "postgres_connection_string_secret_name" {
+  description = "Secrets Manager secret containing the RDS PostgreSQL connection string"
+  value       = module.init.postgres_connection_string_secret_name
+}
+
+output "redis_endpoint" {
+  description = "Private managed Valkey endpoint, or null when managed Redis is disabled"
+  value       = var.redis_managed ? module.redis[0].endpoint_address : null
+}

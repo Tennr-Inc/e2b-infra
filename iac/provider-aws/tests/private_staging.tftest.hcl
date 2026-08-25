@@ -75,6 +75,39 @@ run "private_staging_topology" {
     condition     = var.allow_sandbox_internal_cidrs == ""
     error_message = "Initial staging must not allow sandbox access to private CIDRs."
   }
+
+  assert {
+    condition     = module.postgres.security_posture.storage_encrypted && !module.postgres.security_posture.publicly_accessible
+    error_message = "PostgreSQL must be encrypted and have no public endpoint."
+  }
+
+  assert {
+    condition     = module.postgres.security_posture.deletion_protection && module.postgres.security_posture.backup_retention_period == 7
+    error_message = "PostgreSQL must retain backups and resist accidental deletion by default."
+  }
+
+  assert {
+    condition     = module.postgres.security_posture.force_ssl
+    error_message = "PostgreSQL must reject non-TLS client connections."
+  }
+}
+
+run "managed_redis_topology" {
+  command = plan
+
+  variables {
+    redis_managed = true
+  }
+
+  assert {
+    condition     = module.redis[0].security_posture.at_rest_encryption_enabled && module.redis[0].security_posture.transit_encryption_enabled
+    error_message = "Managed Redis must encrypt data at rest and in transit."
+  }
+
+  assert {
+    condition     = module.redis[0].security_posture.multi_az_enabled && module.redis[0].security_posture.automatic_failover_enabled
+    error_message = "Managed Redis must use Multi-AZ automatic failover."
+  }
 }
 
 run "reject_public_ingress" {
@@ -95,4 +128,15 @@ run "reject_incomplete_peering" {
   }
 
   expect_failures = [aws_vpc_peering_connection.peer[0]]
+}
+
+run "reject_single_node_managed_redis" {
+  command = plan
+
+  variables {
+    redis_managed      = true
+    redis_replica_size = 1
+  }
+
+  expect_failures = [var.redis_replica_size]
 }
