@@ -2,30 +2,32 @@ resource "aws_security_group" "ingress" {
   name   = "${var.prefix}ingress-load-balancer"
   vpc_id = module.init.vpc_id
 
-  ingress {
-    from_port        = 80
-    to_port          = 80
-    protocol         = "TCP"
-    cidr_blocks      = ["0.0.0.0/0"]
-    ipv6_cidr_blocks = ["::/0"]
+  dynamic "ingress" {
+    for_each = toset(var.ingress_allowed_cidr_blocks)
+
+    content {
+      description = "Private HTTPS ingress from ${ingress.value}"
+      from_port   = 443
+      to_port     = 443
+      protocol    = "TCP"
+      cidr_blocks = [ingress.value]
+    }
   }
 
-  ingress {
-    from_port        = 443
-    to_port          = 443
-    protocol         = "TCP"
-    cidr_blocks      = ["0.0.0.0/0"]
-    ipv6_cidr_blocks = ["::/0"]
-  }
-
-  // We are already limiting network access on ingress of specific instances
   egress {
-    from_port        = 0
-    to_port          = 0
-    protocol         = "-1"
-    description      = "Allow all outbound traffic"
-    cidr_blocks      = ["0.0.0.0/0"]
-    ipv6_cidr_blocks = ["::/0"]
+    description = "Forward application traffic to API nodes"
+    from_port   = local.ingress_port
+    to_port     = local.ingress_port
+    protocol    = "TCP"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  egress {
+    description = "Forward Nomad UI traffic to control nodes"
+    from_port   = local.nomad_port
+    to_port     = local.nomad_port
+    protocol    = "TCP"
+    cidr_blocks = [var.vpc_cidr]
   }
 
   tags = {
@@ -34,10 +36,12 @@ resource "aws_security_group" "ingress" {
 }
 
 resource "aws_lb" "ingress" {
-  name               = "${var.prefix}ingress"
-  internal           = false
-  load_balancer_type = "application"
-  subnets            = module.init.vpc_public_subnet_ids
+  name                       = "${var.prefix}ingress"
+  internal                   = true
+  load_balancer_type         = "application"
+  subnets                    = module.init.vpc_private_ingress_subnet_ids
+  drop_invalid_header_fields = true
+  enable_deletion_protection = var.enable_alb_deletion_protection
   security_groups = [
     aws_security_group.ingress.id
   ]
@@ -49,31 +53,14 @@ resource "aws_lb" "ingress" {
   }
 }
 
-resource "aws_lb_listener" "ingress_redirect" {
-  load_balancer_arn = aws_lb.ingress.arn
-
-  port     = "80"
-  protocol = "HTTP"
-
-  default_action {
-    type = "redirect"
-
-    redirect {
-      protocol    = "HTTPS"
-      port        = "443"
-      status_code = "HTTP_301"
-    }
-  }
-}
-
 resource "aws_lb_listener" "ingress_wildcard" {
   load_balancer_arn = aws_lb.ingress.arn
 
   port     = "443"
   protocol = "HTTPS"
 
-  ssl_policy      = "ELBSecurityPolicy-2016-08"
-  certificate_arn = aws_acm_certificate_validation.wildcard.certificate_arn
+  ssl_policy      = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn = var.ingress_certificate_arn
 
   default_action {
     type             = "forward"

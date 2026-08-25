@@ -18,6 +18,12 @@ jobs:
     if: ${{ inputs.run-validation == true }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        provider:
+          - aws
+          - gcp
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -36,10 +42,15 @@ jobs:
         run: terraform fmt -check -recursive
 
       - name: Validate terraform
-        working-directory: ./iac/provider-gcp
+        working-directory: ./iac/provider-${{ matrix.provider }}
         run: |
           terraform init -backend=false
           terraform validate
+
+      - name: Test AWS private deployment invariants
+        if: ${{ matrix.provider == 'aws' }}
+        working-directory: ./iac/provider-aws
+        run: terraform test
 
   validate_terraform:
     needs: run-terraform-validation

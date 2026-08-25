@@ -5,11 +5,6 @@ terraform {
       version = "~> 6.35.1"
     }
 
-    cloudflare = {
-      source  = "cloudflare/cloudflare"
-      version = "4.48.0"
-    }
-
     nomad = {
       source  = "hashicorp/nomad"
       version = "2.1.0"
@@ -24,15 +19,23 @@ terraform {
   required_version = ">= 1.0"
 
   backend "s3" {
-    key = "terraform/orchestration/state"
+    key     = "terraform/orchestration/state"
+    encrypt = true
   }
 }
 
-provider "cloudflare" {
-  api_token = module.init.cloudflare.token
-}
+provider "aws" {
+  region              = var.aws_region
+  allowed_account_ids = [var.aws_account_id]
 
-provider "aws" {}
+  default_tags {
+    tags = {
+      Environment = var.environment
+      ManagedBy   = "terraform"
+      Service     = "e2b"
+    }
+  }
+}
 
 provider "nomad" {
   address      = "https://nomad.${var.domain_name}"
@@ -53,9 +56,16 @@ module "init" {
   bucket_prefix = var.bucket_prefix
 
   region = data.aws_region.current.id
-  endpoint_ingress_subnet_ids = [
+  endpoint_ingress_security_group_ids = [
     aws_security_group.cluster_node.id
   ]
+
+  vpc_availability_zones  = var.vpc_availability_zones
+  vpc_cidr                = var.vpc_cidr
+  vpc_public_subnets      = var.vpc_public_subnets
+  vpc_private_subnets     = var.vpc_private_subnets
+  vpc_elasticache_subnets = var.vpc_elasticache_subnets
+  use_instance_connect    = var.use_instance_connect
 
   allow_force_destroy = var.allow_force_destroy
 

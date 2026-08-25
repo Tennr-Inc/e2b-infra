@@ -65,13 +65,6 @@ output "db_migrator_repository_name" {
 }
 
 // ---
-// Cloudflare
-// ---
-output "cloudflare" {
-  value = module.cloudflare.cloudflare
-}
-
-// ---
 // Network
 // ---
 output "vpc_id" {
@@ -84,6 +77,14 @@ output "vpc_public_subnet_ids" {
 
 output "vpc_private_subnet_ids" {
   value = module.network.vpc_private_subnets
+}
+
+output "vpc_private_ingress_subnet_ids" {
+  value = module.network.vpc_private_ingress_subnet_ids
+}
+
+output "vpc_private_route_table_ids" {
+  value = module.network.vpc_private_route_table_ids
 }
 
 output "vpc_elasticache_subnet_group_name" {

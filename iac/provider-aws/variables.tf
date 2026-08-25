@@ -1,5 +1,123 @@
 variable "domain_name" {
-  type = string
+  type        = string
+  description = "Private DNS suffix used by the API, Nomad UI, and sandbox wildcard hostnames"
+}
+
+variable "aws_account_id" {
+  type        = string
+  description = "AWS account that Terraform is allowed to modify"
+
+  validation {
+    condition     = can(regex("^[0-9]{12}$", var.aws_account_id))
+    error_message = "aws_account_id must be a 12-digit AWS account ID."
+  }
+}
+
+variable "aws_region" {
+  type        = string
+  description = "AWS region for the E2B deployment"
+}
+
+variable "ingress_certificate_arn" {
+  type        = string
+  description = "ACM certificate ARN covering the private wildcard domain"
+
+  validation {
+    condition     = can(regex("^arn:aws[a-zA-Z-]*:acm:", var.ingress_certificate_arn))
+    error_message = "ingress_certificate_arn must be an ACM certificate ARN."
+  }
+}
+
+variable "ingress_allowed_cidr_blocks" {
+  type        = list(string)
+  description = "IPv4 CIDRs allowed to reach the private ALB on HTTPS"
+
+  validation {
+    condition = length(var.ingress_allowed_cidr_blocks) > 0 && alltrue([
+      for cidr in var.ingress_allowed_cidr_blocks : can(cidrhost(cidr, 0)) && cidr != "0.0.0.0/0"
+    ])
+    error_message = "Provide at least one valid CIDR, and do not allow 0.0.0.0/0."
+  }
+}
+
+variable "enable_alb_deletion_protection" {
+  type        = bool
+  description = "Protect the private ALB from accidental deletion"
+  default     = false
+}
+
+variable "vpc_cidr" {
+  type        = string
+  description = "Non-overlapping CIDR for the dedicated E2B VPC"
+
+  validation {
+    condition     = can(cidrhost(var.vpc_cidr, 0))
+    error_message = "vpc_cidr must be a valid IPv4 CIDR."
+  }
+}
+
+variable "vpc_availability_zones" {
+  type        = list(string)
+  description = "Three availability zones used by the E2B VPC"
+
+  validation {
+    condition     = length(var.vpc_availability_zones) == 3
+    error_message = "Exactly three availability zones are required."
+  }
+}
+
+variable "vpc_public_subnets" {
+  type        = list(string)
+  description = "Three public subnet CIDRs used only for NAT gateways"
+
+  validation {
+    condition     = length(var.vpc_public_subnets) == 3
+    error_message = "Exactly three public subnet CIDRs are required."
+  }
+}
+
+variable "vpc_private_subnets" {
+  type        = list(string)
+  description = "Private subnet CIDRs for E2B nodes and the internal ALB"
+
+  validation {
+    condition     = length(var.vpc_private_subnets) >= 3
+    error_message = "At least three private subnet CIDRs are required."
+  }
+}
+
+variable "vpc_elasticache_subnets" {
+  type        = list(string)
+  description = "Three isolated subnet CIDRs for managed Redis"
+
+  validation {
+    condition     = length(var.vpc_elasticache_subnets) == 3
+    error_message = "Exactly three ElastiCache subnet CIDRs are required."
+  }
+}
+
+variable "use_instance_connect" {
+  type        = bool
+  description = "Create an EC2 Instance Connect endpoint for private node administration"
+  default     = true
+}
+
+variable "peer_vpc_id" {
+  type        = string
+  description = "Existing same-account, same-region VPC to peer with; leave empty to disable peering"
+  default     = ""
+}
+
+variable "peer_vpc_cidr" {
+  type        = string
+  description = "CIDR of the peer VPC"
+  default     = ""
+}
+
+variable "peer_route_table_ids" {
+  type        = list(string)
+  description = "Peer VPC route tables that should route the E2B CIDR over the peering connection"
+  default     = []
 }
 
 variable "allow_force_destroy" {

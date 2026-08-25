@@ -28,8 +28,7 @@
 
 **Accounts**
 
-- Cloudflare account
-- Domain on Cloudflare
+- Cloudflare account and domain (GCP only)
 - PostgreSQL database
 
 **Optional**
@@ -110,6 +109,8 @@ Now, you should see the right quota options in `All Quotas` and be able to reque
     aws configure --profile <your-profile>
     ```
 - AWS account
+- An ACM certificate covering `*.${DOMAIN_NAME}`
+- An existing same-account VPC to peer with, if private consumers live outside the E2B VPC
 
 ### Steps
 
@@ -119,20 +120,22 @@ Now, you should see the right quota options in `All Quotas` and be able to reque
     - `AWS_ACCOUNT_ID` - your AWS account ID
     - `AWS_REGION` - the AWS region to deploy to (must support nested virtualization for Firecracker)
     - `PREFIX` - name prefix for all resources (e.g. `e2b-`)
-    - `DOMAIN_NAME` - your domain managed by Cloudflare
+    - `DOMAIN_NAME` - private DNS suffix, for example `e2b.staging.internal.example.com`
+    - `INGRESS_CERTIFICATE_ARN` - ACM certificate covering `*.${DOMAIN_NAME}`
+    - `INGRESS_ALLOWED_CIDR_BLOCKS` - JSON list of private CIDRs allowed to reach HTTPS ingress
+    - `VPC_CIDR`, `VPC_AVAILABILITY_ZONES`, `VPC_PUBLIC_SUBNETS`, `VPC_PRIVATE_SUBNETS`, and `VPC_ELASTICACHE_SUBNETS` - the dedicated, non-overlapping E2B network layout
+    - `PEER_VPC_ID`, `PEER_VPC_CIDR`, and `PEER_ROUTE_TABLE_IDS` - optional same-account, same-region peering configuration
     - `TERRAFORM_ENVIRONMENT` - one of `prod`, `staging`, `dev`
 2. Run `make set-env ENV={prod,staging,dev}` to start using your env
 3. Run `make provider-login` to authenticate with AWS ECR
 4. Run `make init`. This creates:
     - S3 bucket for Terraform state
-    - VPC, subnets, and networking
+    - Dedicated VPC, private workload subnets, NAT subnets, endpoints, and optional VPC peering
     - ECR repositories for container images
     - S3 buckets for templates, kernels, builds, and backups
     - Secrets in AWS Secrets Manager (with placeholder values)
-    - Cloudflare DNS records and TLS certificates
+    - Internal Application Load Balancer and private Route53 wildcard DNS
 5. Update the following secrets in [AWS Secrets Manager](https://console.aws.amazon.com/secretsmanager) with actual values:
-    - `{prefix}cloudflare` - JSON with `TOKEN` key
-        > Get Cloudflare API Token: go to the [Cloudflare dashboard](https://dash.cloudflare.com/) -> Manage Account -> Account API Tokens -> Create Token -> Edit Zone DNS -> in "Zone Resources" select your domain and generate the token
     - `{prefix}postgres-connection-string` - your PostgreSQL connection string (**required**)
     - `{prefix}grafana` - JSON with `API_KEY`, `OTLP_URL`, `OTEL_COLLECTOR_TOKEN`, `USERNAME` keys (optional, for monitoring)
     - `{prefix}launch-darkly-api-key` - LaunchDarkly SDK key (optional, for feature flags)
@@ -152,6 +155,11 @@ Now, you should see the right quota options in `All Quotas` and be able to reque
 
 The AWS deployment provisions the following:
 
+All ingress is private. The Application Load Balancer has no public IPs or HTTP listener, and its
+wildcard record exists only in a Route53 private hosted zone. The AWS provider refuses to run
+outside `AWS_ACCOUNT_ID`. When peering is enabled, Terraform installs routes in both VPCs and
+associates the private zone with the peer VPC.
+
 **Node Pools (EC2 Auto Scaling Groups):**
 - **Control Server** - Nomad/Consul servers (default: 3x `t3.medium`)
 - **API** - API server, ingress, client proxy, otel, loki, logs collector (default: `t3.xlarge`)
@@ -161,6 +169,10 @@ The AWS deployment provisions the following:
 
 **Managed Services (optional):**
 - ElastiCache Redis (set `REDIS_MANAGED=true`)
+
+Sandbox RFC1918 access remains blocked unless `ALLOW_SANDBOX_INTERNAL_CIDRS` is explicitly set.
+Do not set it to the peer VPC CIDR. Use only narrow gateway endpoint CIDRs because the exception
+applies to every sandbox on the orchestrator fleet.
 
 ### AWS Troubleshooting
 
