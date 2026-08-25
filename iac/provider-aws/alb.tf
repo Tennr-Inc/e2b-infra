@@ -60,7 +60,9 @@ resource "aws_lb_listener" "ingress_wildcard" {
   protocol = "HTTPS"
 
   ssl_policy      = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn = var.ingress_certificate_arn
+  certificate_arn = local.ingress_certificate_arn
+
+  depends_on = [aws_acm_certificate_validation.ingress]
 
   default_action {
     type             = "forward"

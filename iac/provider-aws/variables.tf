@@ -20,11 +20,12 @@ variable "aws_region" {
 
 variable "ingress_certificate_arn" {
   type        = string
-  description = "ACM certificate ARN covering the private wildcard domain"
+  description = "Existing ACM certificate ARN covering the private wildcard domain; leave empty to request a DNS-validated certificate"
+  default     = ""
 
   validation {
-    condition     = can(regex("^arn:aws[a-zA-Z-]*:acm:", var.ingress_certificate_arn))
-    error_message = "ingress_certificate_arn must be an ACM certificate ARN."
+    condition     = var.ingress_certificate_arn == "" || can(regex("^arn:aws[a-zA-Z-]*:acm:", var.ingress_certificate_arn))
+    error_message = "ingress_certificate_arn must be empty or an ACM certificate ARN."
   }
 }
 

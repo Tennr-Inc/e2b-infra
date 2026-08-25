@@ -11,6 +11,10 @@ GCP_BUCKET_PREFIX ?= $(GCP_PROJECT_ID)-
 provider-login:
 	$(MAKE) -C iac/provider-$(PROVIDER) provider-login
 
+.PHONY: aws-private-preflight
+aws-private-preflight:
+	@set -a; . ./${ENV_FILE}; set +a; ./scripts/aws-private-preflight.sh
+
 .PHONY: init
 init:
 	./scripts/confirm.sh $(TERRAFORM_ENVIRONMENT)
@@ -27,6 +31,15 @@ download-prod-env:
 .PHONY: plan
 plan:
 	$(MAKE) -C iac/provider-$(PROVIDER) plan
+
+.PHONY: request-certificate
+request-certificate:
+	./scripts/confirm.sh $(TERRAFORM_ENVIRONMENT)
+	$(MAKE) -C iac/provider-$(PROVIDER) request-certificate
+
+.PHONY: certificate-validation-records
+certificate-validation-records:
+	$(MAKE) -C iac/provider-$(PROVIDER) certificate-validation-records
 
 # Deploy all jobs in Nomad
 .PHONY: plan-only-jobs

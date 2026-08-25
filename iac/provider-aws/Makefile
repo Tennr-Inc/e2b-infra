@@ -112,6 +112,16 @@ plan: verify-account
 	@ $(call tf_fmt)
 	@ $(tf_vars) $(TF) plan $(TF_VAR_FILE_ARG) -out=.tfplan.$(ENV) -input=false -compact-warnings -parallelism=20
 
+.PHONY: request-certificate
+request-certificate: verify-account
+	@test -z "$(INGRESS_CERTIFICATE_ARN)" || (echo "INGRESS_CERTIFICATE_ARN is already set; Terraform will use that certificate" && exit 1)
+	@ $(tf_vars) $(TF) apply $(TF_VAR_FILE_ARG) -target=aws_acm_certificate.ingress -auto-approve -input=false -compact-warnings
+	@ $(tf_vars) $(TF) output -json certificate_dns_validation_records
+
+.PHONY: certificate-validation-records
+certificate-validation-records: verify-account
+	@ $(tf_vars) $(TF) output -json certificate_dns_validation_records
+
 plan_only_jobs_moved_targets = -target="random_password.volume_token_key" -target="module.nomad.random_password.volume_token_key"
 
 .PHONY: plan-only-jobs

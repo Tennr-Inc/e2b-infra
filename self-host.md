@@ -100,6 +100,9 @@ Now, you should see the right quota options in `All Quotas` and be able to reque
 
 ## AWS
 
+For a dedicated VPC, internal-only ingress, and VPC peering deployment, follow the
+[private AWS staging runbook](docs/aws-private-staging.md) alongside the steps below.
+
 ### Additional Prerequisites
 
 - [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
@@ -109,7 +112,7 @@ Now, you should see the right quota options in `All Quotas` and be able to reque
     aws configure --profile <your-profile>
     ```
 - AWS account
-- An ACM certificate covering `*.${DOMAIN_NAME}`
+- An ACM certificate covering `*.${DOMAIN_NAME}`, or access to publish one DNS validation CNAME
 - An existing same-account VPC to peer with, if private consumers live outside the E2B VPC
 
 ### Steps
@@ -121,35 +124,40 @@ Now, you should see the right quota options in `All Quotas` and be able to reque
     - `AWS_REGION` - the AWS region to deploy to (must support nested virtualization for Firecracker)
     - `PREFIX` - name prefix for all resources (e.g. `e2b-`)
     - `DOMAIN_NAME` - private DNS suffix, for example `e2b.staging.internal.example.com`
-    - `INGRESS_CERTIFICATE_ARN` - ACM certificate covering `*.${DOMAIN_NAME}`
+    - `INGRESS_CERTIFICATE_ARN` - optional existing ACM certificate covering `*.${DOMAIN_NAME}`;
+      leave empty to request one with `make request-certificate`
     - `INGRESS_ALLOWED_CIDR_BLOCKS` - JSON list of private CIDRs allowed to reach HTTPS ingress
     - `VPC_CIDR`, `VPC_AVAILABILITY_ZONES`, `VPC_PUBLIC_SUBNETS`, `VPC_PRIVATE_SUBNETS`, and `VPC_ELASTICACHE_SUBNETS` - the dedicated, non-overlapping E2B network layout
     - `PEER_VPC_ID`, `PEER_VPC_CIDR`, and `PEER_ROUTE_TABLE_IDS` - optional same-account, same-region peering configuration
     - `TERRAFORM_ENVIRONMENT` - one of `prod`, `staging`, `dev`
 2. Run `make set-env ENV={prod,staging,dev}` to start using your env
-3. Run `make provider-login` to authenticate with AWS ECR
-4. Run `make init`. This creates:
+3. Run `make aws-private-preflight` to verify the account, peer network, local tools, and certificate
+4. Run `make provider-login` to authenticate with AWS ECR
+5. Run `make init`. This creates:
     - S3 bucket for Terraform state
     - Dedicated VPC, private workload subnets, NAT subnets, endpoints, and optional VPC peering
     - ECR repositories for container images
     - S3 buckets for templates, kernels, builds, and backups
     - Secrets in AWS Secrets Manager (with placeholder values for optional integrations)
-5. Update the following secrets in [AWS Secrets Manager](https://console.aws.amazon.com/secretsmanager) with actual values:
+6. If `INGRESS_CERTIFICATE_ARN` is empty, run `make request-certificate`, publish the printed CNAME
+   in authoritative public DNS, and wait for ACM to issue the certificate. This record performs
+   validation only; E2B service DNS remains private.
+7. Update the following secrets in [AWS Secrets Manager](https://console.aws.amazon.com/secretsmanager) with actual values:
     - `{prefix}grafana` - JSON with `API_KEY`, `OTLP_URL`, `OTEL_COLLECTOR_TOKEN`, `USERNAME` keys (optional, for monitoring)
     - `{prefix}launch-darkly-api-key` - LaunchDarkly SDK key (optional, for feature flags)
-6. Build the Packer AMI for cluster nodes (a single shared AMI used by all node types):
+8. Build the Packer AMI for cluster nodes (a single shared AMI used by all node types):
     ```sh
     cd iac/provider-aws/nomad-cluster-disk-image
     make init   # install Packer plugins
     make build  # build the AMI (~5 min, launches a t3.large)
     ```
-7. Run `make build-and-upload` to build and push container images and binaries
-8. Run `make copy-public-builds` to copy kernels, Firecracker versions, and busybox to your S3 buckets
-9. Run `make plan-without-jobs` and then `make apply` to provision the cluster infrastructure,
+9. Run `make build-and-upload` to build and push container images and binaries
+10. Run `make copy-public-builds` to copy kernels, Firecracker versions, and busybox to your S3 buckets
+11. Run `make plan-without-jobs` and then `make apply` to provision the cluster infrastructure,
    private RDS PostgreSQL, managed Valkey when enabled, the internal ALB, and private DNS. Terraform
    writes the generated PostgreSQL connection string to `{prefix}postgres-connection-string`.
-10. Run `make plan` and then `make apply` to deploy all Nomad jobs (this also runs database migrations automatically via the API's db-migrator task)
-11. Setup data in the cluster by running `make prep-cluster` to create an initial user, team, and build a base template
+12. Run `make plan` and then `make apply` to deploy all Nomad jobs (this also runs database migrations automatically via the API's db-migrator task)
+13. Setup data in the cluster by running `make prep-cluster` to create an initial user, team, and build a base template
 
 ### AWS Architecture
 
@@ -250,6 +258,9 @@ You can build your own kernel and Firecracker version from source by running `ma
 - `make copy-public-builds` - copies busybox, kernels, and firecracker versions from the public bucket to your bucket
 - `make migrate` - runs the migrations for your database
 - `make provider-login` - logs in to cloud provider
+- `make aws-private-preflight` - validates AWS account, peer network, private ingress, tools, instance offerings, and certificate
+- `make request-certificate` - requests an ACM certificate and prints the external DNS validation record
+- `make certificate-validation-records` - prints the managed ACM certificate validation record again
 - `make switch-env ENV={prod,staging,dev}` - switches the environment
 - `make import TARGET={resource} ID={resource_id}` - imports the already created resources into the terraform state
 - `make setup-ssh` - sets up the ssh key for the environment (useful for remote-debugging)

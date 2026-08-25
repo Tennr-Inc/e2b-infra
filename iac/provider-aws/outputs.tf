@@ -32,3 +32,20 @@ output "redis_endpoint" {
   description = "Private managed Valkey endpoint, or null when managed Redis is disabled"
   value       = var.redis_managed ? module.redis[0].endpoint_address : null
 }
+
+output "ingress_certificate_arn" {
+  description = "ACM certificate used by the private HTTPS listener"
+  value       = local.ingress_certificate_arn
+}
+
+output "certificate_dns_validation_records" {
+  description = "Public DNS CNAMEs required only to validate a Terraform-managed ACM certificate"
+  value = local.manage_ingress_certificate ? [
+    for option in aws_acm_certificate.ingress[0].domain_validation_options : {
+      domain = option.domain_name
+      name   = option.resource_record_name
+      type   = option.resource_record_type
+      value  = option.resource_record_value
+    }
+  ] : []
+}
