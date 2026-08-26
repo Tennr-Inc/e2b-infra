@@ -1,0 +1,35 @@
+install -d -m 0755 /opt/e2b/bin
+printf '%s' '${reporter_base64}' | base64 --decode > /opt/e2b/bin/report-capacity.py
+chmod 0755 /opt/e2b/bin/report-capacity.py
+
+cat > /etc/systemd/system/e2b-capacity.service <<'UNIT'
+[Unit]
+Description=Publish E2B sandbox memory capacity to CloudWatch
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/e2b/bin/report-capacity.py --region ${aws_region} --asg ${asg_name}
+TimeoutStartSec=45
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+UNIT
+
+cat > /etc/systemd/system/e2b-capacity.timer <<'UNIT'
+[Unit]
+Description=Sample E2B sandbox memory capacity every minute
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=60s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now e2b-capacity.timer

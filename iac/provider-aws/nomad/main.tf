@@ -138,6 +138,10 @@ module "orchestrator" {
   artifact_source       = local.orchestrator_artifact_source
   orchestrator_checksum = data.aws_s3_object.orchestrator.etag
   job_env_vars          = var.orchestrator_env_vars
+
+  # AWS Nomad clients do not publish orchestrator_job_version metadata.
+  # Replace the prior system job instead of constraining placement by version.
+  version_constraint_enabled = false
 }
 
 data "aws_s3_object" "template_manager" {

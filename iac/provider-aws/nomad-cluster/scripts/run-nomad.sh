@@ -324,6 +324,13 @@ function generate_supervisor_config {
   local -r nomad_log_dir="$5"
   local nomad_user="$6"
   local -r use_sudo="$7"
+  local nomad_command="$nomad_bin_dir/nomad agent -config $nomad_config_dir -data-dir $nomad_data_dir"
+
+  # Sandbox workers install this hook; API and server nodes keep their normal
+  # command. Keep Consul independent so the hook can use its DNS after reboot.
+  if [[ -x "$nomad_bin_dir/prepare-host.sh" ]]; then
+    nomad_command="/bin/bash -c '$nomad_bin_dir/prepare-host.sh && exec $nomad_command'"
+  fi
 
   if [[ "$use_sudo" == "true" ]]; then
     log_info "The --use-sudo flag is set, so running Nomad as the root user"
@@ -333,7 +340,7 @@ function generate_supervisor_config {
   log_info "Creating Supervisor config file to run Nomad in $supervisor_config_path"
   cat >"$supervisor_config_path" <<EOF
 [program:nomad]
-command=$nomad_bin_dir/nomad agent -config $nomad_config_dir -data-dir $nomad_data_dir
+command=$nomad_command
 stdout_logfile=$nomad_log_dir/nomad-stdout.log
 stderr_logfile=$nomad_log_dir/nomad-error.log
 numprocs=1
@@ -381,6 +388,12 @@ node_pool "build" {
 }
 EOF
   nomad node pool apply -token "$nomad_token" "$config_dir/build_node_pool.hcl"
+  cat > "$config_dir/clickhouse_node_pool.hcl"  <<EOF
+node_pool "clickhouse" {
+  description = "Nodes for ClickHouse."
+}
+EOF
+  nomad node pool apply -token "$nomad_token" "$config_dir/clickhouse_node_pool.hcl"
 }
 
 # Based on: http://unix.stackexchange.com/a/7732/215969

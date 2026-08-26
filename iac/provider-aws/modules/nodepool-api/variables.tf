@@ -60,6 +60,10 @@ variable "machine_type" {
   default = "t3.xlarge"
 }
 
+variable "ebs_kms_key_arn" {
+  type = string
+}
+
 variable "node_pool_name" {
   type        = string
   description = "Nomad node pool name for this pool"

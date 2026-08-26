@@ -55,6 +55,9 @@ func main() {
 
 	// Convert pgxpool to *sql.DB for goose compatibility
 	db := stdlib.OpenDBFromPool(pool)
+	if err = ensureCompatibilityRoles(ctx, db); err != nil {
+		log.Fatalf("failed to ensure migration compatibility roles: %v", err)
+	}
 
 	// Create a session locking
 	sessionLocker, err := lock.NewPostgresSessionLocker()
@@ -110,6 +113,25 @@ func main() {
 	}
 
 	fmt.Println("Migrations applied successfully.")
+}
+
+// ensureCompatibilityRoles preserves compatibility with historical migrations
+// that grant privileges to the conventional PostgreSQL administrator role.
+// Managed databases such as RDS may use a differently named master user, so a
+// no-login role is sufficient and avoids requiring a manual bootstrap query.
+func ensureCompatibilityRoles(ctx context.Context, db *sql.DB) error {
+	_, err := db.ExecContext(ctx, `DO $$
+BEGIN
+    CREATE ROLE postgres NOLOGIN;
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END
+$$;`)
+	if err != nil {
+		return fmt.Errorf("failed to create postgres compatibility role: %w", err)
+	}
+
+	return nil
 }
 
 func setupAuthSchema(ctx context.Context, db *sql.DB, version int64) error {
