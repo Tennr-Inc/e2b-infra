@@ -38,7 +38,10 @@ func NewFromFd(fd int) (*Memfd, error) {
 
 		return nil, fmt.Errorf("fstat memfd: %w", err)
 	}
-	b, err := unix.Mmap(fd, 0, int(st.Size), unix.PROT_READ, unix.MAP_SHARED)
+	// Match Firecracker's lazy allocation policy. Without MAP_NORESERVE, even
+	// this read-only HugeTLB mapping reserves backing for the entire guest and
+	// can fail before any pages are faulted in. Page faults still need memory.
+	b, err := unix.Mmap(fd, 0, int(st.Size), unix.PROT_READ, unix.MAP_SHARED|unix.MAP_NORESERVE)
 	if err != nil {
 		_ = unix.Close(fd)
 

@@ -6,12 +6,22 @@ output "vpc_private_subnets" {
   value = module.vpc.private_subnets
 }
 
+output "vpc_private_ingress_subnet_ids" {
+  description = "One private subnet per availability zone for the internal ALB"
+  value       = slice(module.vpc.private_subnets, 0, length(var.vpc_availability_zones))
+}
+
 output "vpc_public_subnet_ids" {
   value = local.default_public_subnet_ids
 }
 
 output "elasticache_subnet_group_name" {
   value = module.vpc.elasticache_subnet_group_name
+}
+
+output "elasticache_subnet_ids" {
+  description = "Isolated data subnet IDs used by managed Redis and PostgreSQL"
+  value       = module.vpc.elasticache_subnets
 }
 
 output "instance_connect_security_group_id" {

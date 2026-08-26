@@ -13,8 +13,10 @@ import (
 	"path/filepath"
 	"strings"
 	txtTemplate "text/template"
+	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/proxy"
@@ -33,6 +35,8 @@ type Copy struct {
 }
 
 var _ Command = (*Copy)(nil)
+
+const copyCleanupTimeout = 30 * time.Second
 
 type copyScriptData struct {
 	SourcePath  string
@@ -53,16 +57,16 @@ var copyScriptTemplate = txtTemplate.Must(txtTemplate.New("copy-script-template"
 // Execute implements the Copy command.
 // It works in the following steps:
 // 1) Downloads the layer tar file from the storage to the local filesystem
-// 2) Copies the file to the sandbox's /tmp directory
-// 3) Extracts it (still in the /tmp directory)
+// 2) Copies the file to a rootfs-backed scratch directory in the sandbox
+// 3) Extracts it in that scratch directory and removes the compressed archive
 // 4) Moves the extracted files to the target path in the sandbox
 //   - If the source is a file, it creates the parent directories and moves the file
 //   - If the source is a directory, it merges its contents into the target
 //     directory (Docker COPY semantics: existing directories are merged into,
 //     existing files are overwritten)
 
-// Note: The temporary files in the /tmp directory are cleaned up automatically on sandbox restart
-// because the /tmp is mounted as a tmpfs and deleted on restart.
+// The scratch directory is removed explicitly because it is part of the rootfs
+// and would otherwise be captured in the resulting template layer.
 func (c *Copy) Execute(
 	ctx context.Context,
 	logger logger.Logger,
@@ -81,6 +85,11 @@ func (c *Copy) Execute(
 
 	if step.FilesHash == nil || step.GetFilesHash() == "" {
 		return metadata.Context{}, fmt.Errorf("%s requires files hash to be set", cmdType)
+	}
+
+	sbxScratchPath, sbxTargetPath, sbxUnpackPath, err := copyScratchPaths(step.GetFilesHash())
+	if err != nil {
+		return metadata.Context{}, fmt.Errorf("invalid files hash for %s: %w", cmdType, err)
 	}
 
 	// 1) Download the layer tar file from the storage to the local filesystem
@@ -110,28 +119,72 @@ func (c *Copy) Execute(
 		return metadata.Context{}, fmt.Errorf("failed to copy layer tar data to temporary file: %w", err)
 	}
 
-	// The file is automatically cleaned up by the sandbox restart in the last step.
-	// This is happening because the /tmp is mounted as a tmpfs and deleted on restart.
-	sbxTargetPath := filepath.Join("/tmp", fmt.Sprintf("%s.tar", step.GetFilesHash()))
-	// 2) Copy the tar file to the sandbox
+	// Create rootfs-backed scratch space and report both filesystems before the
+	// upload. These diagnostics make it explicit that COPY capacity comes from /
+	// rather than the RAM-backed /tmp mount.
+	err = sandboxtools.RunCommandWithLogger(
+		ctx,
+		proxy,
+		logger,
+		zapcore.InfoLevel,
+		"copy-space-before",
+		sandboxID,
+		fmt.Sprintf(`mkdir -p "%s" && df -Pk / /tmp`, sbxScratchPath),
+		cmdMetadata.WithUser("root"),
+	)
+	if err != nil {
+		return metadata.Context{}, fmt.Errorf("failed to prepare COPY scratch space: %w", err)
+	}
+
+	cleanupNeeded := true
+	defer func() {
+		if !cleanupNeeded {
+			return
+		}
+
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), copyCleanupTimeout)
+		defer cancel()
+		if cleanupErr := sandboxtools.RunCommand(
+			cleanupCtx,
+			proxy,
+			sandboxID,
+			fmt.Sprintf(`rm -rf -- "%s"`, sbxScratchPath),
+			cmdMetadata.WithUser("root"),
+		); cleanupErr != nil && logger != nil {
+			logger.Warn(cleanupCtx, "failed to clean COPY scratch space", zap.Error(cleanupErr), zap.String("path", sbxScratchPath))
+		}
+	}()
+
+	// 2) Copy the tar file to the sandbox rootfs scratch directory.
 	err = sandboxtools.CopyFile(ctx, proxy, sandboxID, "root", tmpFile.Name(), sbxTargetPath)
 	if err != nil {
 		return metadata.Context{}, fmt.Errorf("failed to copy layer tar data to sandbox: %w", err)
 	}
 
-	// Create nested unpack directory to allow multiple files in the root be correctly detected
-	sbxUnpackPath := filepath.Join("/tmp", step.GetFilesHash(), "unpack")
-
-	// 3) Extract the tar file in the sandbox's /tmp directory
+	// 3) Extract on the rootfs, then immediately remove the compressed archive.
+	// The expanded tree remains for Docker-compatible merge semantics in step 4.
 	err = sandboxtools.RunCommand(
 		ctx,
 		proxy,
 		sandboxID,
-		fmt.Sprintf(`mkdir -p "%s" && tar -xzvf "%s" -C "%s"`, sbxUnpackPath, sbxTargetPath, sbxUnpackPath),
+		fmt.Sprintf(`mkdir -p "%s" && tar -xzf "%s" -C "%s" && rm -f -- "%s"`, sbxUnpackPath, sbxTargetPath, sbxUnpackPath, sbxTargetPath),
 		cmdMetadata.WithUser("root"),
 	)
 	if err != nil {
 		return metadata.Context{}, fmt.Errorf("failed to extract files: %w", err)
+	}
+	err = sandboxtools.RunCommandWithLogger(
+		ctx,
+		proxy,
+		logger,
+		zapcore.InfoLevel,
+		"copy-space-after-extract",
+		sandboxID,
+		`df -Pk / /tmp`,
+		cmdMetadata.WithUser("root"),
+	)
+	if err != nil {
+		return metadata.Context{}, fmt.Errorf("failed to report COPY space after extraction: %w", err)
 	}
 
 	var moveScript bytes.Buffer
@@ -164,6 +217,24 @@ func (c *Copy) Execute(
 	if err != nil {
 		return metadata.Context{}, fmt.Errorf("failed to move files in sandbox: %w", err)
 	}
+
+	// Rootfs-backed scratch survives a sandbox restart, so successful cleanup is
+	// part of COPY correctness. Also emit the final rootfs/tmpfs capacity after
+	// the target contains the copied data.
+	err = sandboxtools.RunCommandWithLogger(
+		ctx,
+		proxy,
+		logger,
+		zapcore.InfoLevel,
+		"copy-space-after-cleanup",
+		sandboxID,
+		fmt.Sprintf(`rm -rf -- "%s" && df -Pk / /tmp`, sbxScratchPath),
+		cmdMetadata.WithUser("root"),
+	)
+	if err != nil {
+		return metadata.Context{}, fmt.Errorf("failed to clean COPY scratch space: %w", err)
+	}
+	cleanupNeeded = false
 
 	return cmdMetadata, nil
 }

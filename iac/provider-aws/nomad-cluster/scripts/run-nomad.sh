@@ -381,6 +381,12 @@ node_pool "build" {
 }
 EOF
   nomad node pool apply -token "$nomad_token" "$config_dir/build_node_pool.hcl"
+  cat > "$config_dir/clickhouse_node_pool.hcl"  <<EOF
+node_pool "clickhouse" {
+  description = "Nodes for ClickHouse."
+}
+EOF
+  nomad node pool apply -token "$nomad_token" "$config_dir/clickhouse_node_pool.hcl"
 }
 
 # Based on: http://unix.stackexchange.com/a/7732/215969

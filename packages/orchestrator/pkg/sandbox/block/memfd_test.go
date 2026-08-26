@@ -46,6 +46,68 @@ func newTestMemfd(t *testing.T, size int64) (memfd *Memfd, data []byte) {
 	return memfd, data
 }
 
+func TestNewFromFd_HugeTLBNoReservation(t *testing.T) {
+	t.Parallel()
+
+	fd, err := unix.MemfdCreate("guest_mem", unix.MFD_CLOEXEC|unix.MFD_HUGETLB|unix.MFD_HUGE_2MB)
+	if errors.Is(err, unix.ENOSYS) || errors.Is(err, unix.ENODEV) || errors.Is(err, unix.EPERM) {
+		t.Skipf("HugeTLB memfds unavailable: %v", err)
+	}
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if fd >= 0 {
+			assert.NoError(t, unix.Close(fd))
+		}
+	})
+
+	size := int(header.HugepageSize)
+	require.NoError(t, unix.Ftruncate(fd, int64(size)))
+	guest, err := unix.Mmap(fd, 0, size, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED|unix.MAP_NORESERVE)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, unix.Munmap(guest)) })
+
+	// Exercise the allocation failure without changing host sysctls or exhausting
+	// its pool. This probe reserves at most one page; the test needs a runner
+	// with no allocatable hugepages, such as the isolated reproduction VM.
+	probe, err := unix.Mmap(fd, 0, size, unix.PROT_READ, unix.MAP_SHARED)
+	if err == nil {
+		require.NoError(t, unix.Munmap(probe))
+		t.Skip("requires a runner with no allocatable 2 MiB hugepages")
+	}
+	require.ErrorIs(t, err, unix.ENOMEM)
+
+	memfd, err := NewFromFd(fd)
+	fd = -1 // NewFromFd consumes the descriptor on both success and failure.
+	require.NoError(t, err, "the observer must not reserve backing for the guest")
+	t.Cleanup(func() { assert.NoError(t, memfd.Close()) })
+
+	// Creating the view must not fault its unbacked pages. Reading them would
+	// need physical hugepages even with MAP_NORESERVE.
+	view, err := memfd.Slice(0, int64(size))
+	require.NoError(t, err)
+	require.Len(t, view, size)
+}
+
+func TestNewFromFd_ObservesGuestWrites(t *testing.T) {
+	t.Parallel()
+
+	memfd, _ := newTestMemfd(t, int64(header.PageSize))
+	t.Cleanup(func() { assert.NoError(t, memfd.Close()) })
+	guest, err := unix.Mmap(memfd.fd, 0, int(header.PageSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED|unix.MAP_NORESERVE)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, unix.Munmap(guest)) })
+
+	// The observer stays attached to the producer's backing file after mmap.
+	for _, value := range []byte{42, 99} {
+		guest[0] = value
+		var got [1]byte
+		n, err := memfd.ReadAt(got[:], 0)
+		require.NoError(t, err)
+		require.Equal(t, 1, n)
+		require.Equal(t, value, got[0])
+	}
+}
+
 // fullDirty returns a bitmap marking every block in [0, size/blockSize) dirty.
 func fullDirty(size, blockSize int64) *roaring.Bitmap {
 	b := roaring.New()

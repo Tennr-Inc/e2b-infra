@@ -40,6 +40,40 @@ func main() {
 		return
 	}
 
+	teamName := strings.TrimSpace(os.Getenv("E2B_SEED_TEAM_NAME"))
+	if teamName == "" {
+		fmt.Printf("Team name: ")
+		teamName, err = reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Error reading input:", err)
+
+			return
+		}
+		teamName = strings.TrimSpace(teamName)
+	}
+	if teamName == "" {
+		fmt.Println("Error: Team name cannot be empty")
+
+		return
+	}
+
+	teamSlug := strings.TrimSpace(os.Getenv("E2B_SEED_TEAM_SLUG"))
+	if teamSlug == "" {
+		fmt.Printf("Team slug: ")
+		teamSlug, err = reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Error reading input:", err)
+
+			return
+		}
+		teamSlug = strings.TrimSpace(teamSlug)
+	}
+	if teamSlug == "" {
+		fmt.Println("Error: Team slug cannot be empty")
+
+		return
+	}
+
 	teamUUID := uuid.New()
 
 	teamAPIKey, err := keys.GenerateKey(keys.ApiKeyPrefix)
@@ -52,6 +86,8 @@ func main() {
 	fmt.Println()
 	fmt.Println("Seeding database with:")
 	fmt.Printf("  Email: %s\n", email)
+	fmt.Printf("  Team name: %s\n", teamName)
+	fmt.Printf("  Team slug: %s\n", teamSlug)
 	fmt.Printf("  Team ID: %s\n", teamUUID)
 	fmt.Printf("  Team API Key: %s\n", teamAPIKey.PrefixedRawValue)
 	fmt.Println()
@@ -141,7 +177,7 @@ VALUES ($1, $2)
 	err = authDb.TestsRawSQL(ctx, `
 INSERT INTO teams (id, email, name, tier, is_blocked, slug)
 VALUES ($1, $2, $3, $4, $5, $6)
-`, teamUUID, email, "E2B", "base_v1", false, "e2b")
+`, teamUUID, email, teamName, "base_v1", false, teamSlug)
 	if err != nil {
 		panic(err)
 	}
