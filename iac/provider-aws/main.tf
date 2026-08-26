@@ -106,7 +106,10 @@ locals {
   # AMI name prefix must match what Packer produces: "${var.prefix}orch-<timestamp>"
   ami_family_prefix = "${var.prefix}orch-"
 
-  redis_cluster_url   = var.redis_managed ? "rediss://${module.redis[0].endpoint_address}:${local.redis_port}" : ""
+  # E2B's Redis clients pass this value directly to net.Dial. TLS is enabled
+  # separately through REDIS_TLS_ENABLED and REDIS_TLS_CA_BASE64, so this must
+  # remain a bare host:port address rather than a redis:// or rediss:// URI.
+  redis_cluster_url   = var.redis_managed ? "${module.redis[0].endpoint_address}:${local.redis_port}" : ""
   redis_tls_ca_base64 = var.redis_managed ? module.redis[0].endpoint_ca_pem_base64 : ""
   # CA implies TLS: the factory refuses a CA without the flag.
   redis_tls_enabled = var.redis_managed ? "true" : "false"

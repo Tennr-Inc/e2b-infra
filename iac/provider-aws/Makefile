@@ -28,6 +28,7 @@ tf_vars := AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) \
 	$(call tfvar, DOMAIN_NAME) \
 	$(call tfvar, INGRESS_CERTIFICATE_ARN) \
 	$(call tfvar, INGRESS_ALLOWED_CIDR_BLOCKS) \
+	$(call tfvar, INGRESS_ALLOWED_SECURITY_GROUP_IDS) \
 	$(call tfvar, ENABLE_ALB_DELETION_PROTECTION) \
 	$(call tfvar, BUCKET_PREFIX) \
 	$(call tfvar, VPC_CIDR) \

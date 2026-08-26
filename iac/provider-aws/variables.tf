@@ -41,6 +41,19 @@ variable "ingress_allowed_cidr_blocks" {
   }
 }
 
+variable "ingress_allowed_security_group_ids" {
+  type        = list(string)
+  description = "Security groups allowed to reach the private ALB on HTTPS, such as private access connectors"
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for security_group_id in var.ingress_allowed_security_group_ids : can(regex("^sg-[0-9a-f]+$", security_group_id))
+    ])
+    error_message = "ingress_allowed_security_group_ids must contain only AWS security group IDs."
+  }
+}
+
 variable "enable_alb_deletion_protection" {
   type        = bool
   description = "Protect the private ALB from accidental deletion"

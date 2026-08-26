@@ -127,6 +127,7 @@ For a dedicated VPC, internal-only ingress, and VPC peering deployment, follow t
     - `INGRESS_CERTIFICATE_ARN` - optional existing ACM certificate covering `*.${DOMAIN_NAME}`;
       leave empty to request one with `make request-certificate`
     - `INGRESS_ALLOWED_CIDR_BLOCKS` - JSON list of private CIDRs allowed to reach HTTPS ingress
+    - `INGRESS_ALLOWED_SECURITY_GROUP_IDS` - optional JSON list of connector security groups allowed to reach HTTPS ingress
     - `VPC_CIDR`, `VPC_AVAILABILITY_ZONES`, `VPC_PUBLIC_SUBNETS`, `VPC_PRIVATE_SUBNETS`, and `VPC_ELASTICACHE_SUBNETS` - the dedicated, non-overlapping E2B network layout
     - `PEER_VPC_ID`, `PEER_VPC_CIDR`, and `PEER_ROUTE_TABLE_IDS` - optional same-account, same-region peering configuration
     - `TERRAFORM_ENVIRONMENT` - one of `prod`, `staging`, `dev`

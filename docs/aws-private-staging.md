@@ -10,8 +10,9 @@ DNS record, Cloudflare Tunnel, or inbound route from the internet.
   AWS endpoints, and an internal Application Load Balancer.
 - The peer VPC receives an explicit route to the E2B CIDR. E2B private route tables receive the
   reverse route, and the E2B Route53 private zone is associated with both VPCs.
-- The ALB security group accepts HTTPS only from `INGRESS_ALLOWED_CIDR_BLOCKS`. Start with the peer
-  VPC CIDR; add a VPN CIDR only when that VPN has a direct, routable path into the E2B VPC.
+- The ALB security group accepts HTTPS only from `INGRESS_ALLOWED_CIDR_BLOCKS` and
+  `INGRESS_ALLOWED_SECURITY_GROUP_IDS`. Start with the peer VPC CIDR; use a security-group ID for
+  Twingate or another connector in the E2B VPC instead of permitting the entire connector subnet.
 - VPC peering is not transitive. A VPN or transit-gateway attachment to the peer VPC does not, by
   itself, provide operator access through the peer. Use EC2 Instance Connect/SSM initially, or add
   a direct VPN/Twingate/transit-gateway path later.

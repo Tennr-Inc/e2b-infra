@@ -14,6 +14,19 @@ resource "aws_security_group" "ingress" {
     }
   }
 
+  dynamic "ingress" {
+    for_each = toset(var.ingress_allowed_security_group_ids)
+    iterator = source_security_group
+
+    content {
+      description     = "Private HTTPS ingress from ${source_security_group.value}"
+      from_port       = 443
+      to_port         = 443
+      protocol        = "TCP"
+      security_groups = [source_security_group.value]
+    }
+  }
+
   egress {
     description = "Forward application traffic to API nodes"
     from_port   = local.ingress_port
