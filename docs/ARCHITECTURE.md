@@ -132,6 +132,16 @@ The control-plane entry point (Gin, OpenAPI-generated from `spec/openapi.yml`, p
   a marker to a value at sandbox egress, never here. Without a configured address, or with the flag
   off, the routes stay registered and answer 403. Responses are `Cache-Control: no-store`, request bodies are capped at 512 KiB, and values
   at 64 KiB.
+- **Rig passthrough**: admin endpoints under `/clusters/{clusterID}/rigs` manage a cluster's
+  orchestrator node pools ("rigs"). They list rigs, change rig capacity, list and terminate
+  instances, and read recent scaling errors. Every handler delegates to the cluster's edge service
+  (`/v1/rigs/...`) through the per-cluster HTTP client that the cluster sync keeps fresh. The API
+  holds no cloud credentials and makes no scaling decisions. The caller authenticates with the
+  admin token and never holds the cluster's edge secret. Edge status codes pass through unchanged
+  (400, 404, 409, 501). An edge 401 becomes a 500: it means the API is misconfigured against the
+  cluster, not that the caller's token is invalid. A cluster with no rig management configured
+  returns an empty list. The local cluster has no edge deployment and answers 501 for every rig
+  operation.
 - **Extra listeners**: internal gRPC :5009 and edge gRPC :5109 expose `ResumeSandbox` so
   client-proxy can wake paused sandboxes on incoming traffic.
 - Reads ClickHouse for sandbox/team metrics endpoints. Sandbox and template-build logs default to
@@ -221,8 +231,10 @@ the API's `ResumeSandbox` gRPC and retries — paused sandboxes wake transparent
 ### Dashboard API (`packages/dashboard-api`)
 
 A separate REST service (port 3010, spec `spec/openapi-dashboard.yml`) consumed by the web
-dashboard, not the SDK: team management/provisioning, template tags, build listings, admin
-bootstrap. Team-scoped template and build read routes accept either dashboard user auth or
+dashboard, not the SDK: legacy team management/provisioning, template tags, build listings, admin
+bootstrap. The `disable-legacy-team-mutations` LaunchDarkly flag rejects legacy lifecycle writes
+with 412 after authentication; it leaves reads and the workspace API's management projection
+writes available. Team-scoped template and build read routes accept either dashboard user auth or
 team API key auth (`X-API-Key`). Its workspace-agnostic `/v1/management` operations are defined in the
 same dashboard OpenAPI contract and registered on the existing router. Their `AdminJWTAuth`
 OpenAPI security scheme accepts only short-lived service JWTs verified against the workspace-api
@@ -393,6 +405,22 @@ sequenceDiagram
   The disk has crash-recovery semantics (unflushed pre-pause writes are lost), nothing durable
   is mutated (the memory snapshot survives untouched), and auto-resume never takes this path —
   traffic always memory-resumes.
+- **Pre-boot filesystem recovery**: every cold boot of a rootfs that was not frozen at pause
+  (`fs_quiesced` false/absent) runs a jailed `e2fsck -p -E journal_only` before the VM starts —
+  journal replay only, the same recovery the guest kernel would do at mount — so a `memory: false`
+  rescue and a legacy sync-fallback filesystem-only snapshot both mount a consistent disk. It
+  replays and exits without a full consistency scan, so the cost is bounded by journal content,
+  not filesystem size. Runs under the same confinement as the offline envd swap (unprivileged
+  transient unit, device access pinned to the sandbox's own NBD node). A clean replay boots;
+  anything else fails the start with the snapshot untouched but stays retryable. Journal replay
+  never condemns a snapshot: its exit codes cannot tell an unmountable filesystem apart from a
+  transient device fault, so every non-replayed outcome — an operational failure (timeout, I/O,
+  device error) or an e2fsck exit that is not a clean replay — is retryable, never a permanent
+  customer-facing verdict. In-file corruption that still mounts is likewise not condemned — replay
+  does not scan, so it boots. Whole-filesystem repair and condemning a rootfs are left to a
+  separate opt-in full-filesystem repair path. Gated by the `preboot-fs-recovery` flag, separate
+  from `fs-only-resume-api` because it also changes the behavior of existing filesystem-only cold
+  boots.
 - **Envd live-upgrade on resume**: the orchestrator can upgrade the sandbox's envd to a newer
   node-local build during resume (gated by the `envd-upgrade-target` flag in
   `packages/shared/pkg/featureflags`), via envd's `POST /upgrade` (see the envd section). It is
