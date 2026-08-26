@@ -17,6 +17,7 @@ output "security_posture" {
     backup_retention_period = aws_db_instance.this.backup_retention_period
     deletion_protection     = aws_db_instance.this.deletion_protection
     force_ssl               = one([for parameter in aws_db_parameter_group.this.parameter : parameter if parameter.name == "rds.force_ssl"]).value == "1"
+    ingress_security_groups = var.ingress_security_group_ids
     publicly_accessible     = aws_db_instance.this.publicly_accessible
     storage_encrypted       = aws_db_instance.this.storage_encrypted
   }

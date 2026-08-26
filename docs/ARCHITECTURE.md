@@ -444,8 +444,8 @@ fresh resume touches, producing prefetch hints that speed up future sandbox star
 
 ## Deployment topology
 
-Deployed with **Terraform** (`iac/provider-gcp/`, `iac/provider-aws/`) onto a **Nomad + Consul**
-cluster. Nomad job specs live in `iac/modules/job-*/jobs/*.hcl`.
+Deployed with **OpenTofu/Terraform** (`iac/provider-gcp/`, `iac/provider-aws/`) onto a **Nomad +
+Consul** cluster. Nomad job specs live in `iac/modules/job-*/jobs/*.hcl`.
 
 ```mermaid
 flowchart TB
@@ -479,6 +479,11 @@ tables are explicit Terraform inputs. The private zone is associated with the pe
 API, Nomad, and sandbox wildcard names have no public routing records. Public subnets exist only
 to host the NAT gateway used for outbound traffic from private E2B nodes and sandboxes.
 
+The wildcard certificate still requires a publicly resolvable ACM ownership-validation CNAME. An
+optional public Route53 zone ID lets OpenTofu manage that CNAME; it never receives an ALB alias or
+other service record. HTTPS and RDS can separately allow explicit private-access connector security
+groups, keeping operator access narrower than an entire VPC CIDR.
+
 The peering route is host connectivity, not a sandbox firewall exception. Sandbox RFC1918 ranges
 remain denied unless operators populate `ALLOW_SANDBOX_INTERNAL_CIDRS`; any such entry applies to
 all sandboxes on that orchestrator fleet and must therefore identify only a dedicated, authenticated
@@ -495,8 +500,10 @@ The AWS data plane uses an encrypted, private RDS PostgreSQL instance and, when
 `REDIS_MANAGED=true`, an encrypted Multi-AZ ElastiCache Valkey replication group. Both live in
 isolated data subnets and accept traffic only from the E2B cluster-node security group. Terraform
 generates the PostgreSQL credentials, requires TLS in the connection string consumed by the Nomad
-jobs, and writes that string to AWS Secrets Manager. It does not expose either datastore through
-the ALB or the peering CIDR.
+jobs, and writes that string to AWS Secrets Manager. The migrator creates a no-login `postgres`
+compatibility role when a managed database uses a differently named master user, because historical
+migrations grant privileges to that conventional role. Neither datastore is exposed through the
+ALB or a public endpoint.
 
 - **Server nodes** run only Nomad/Consul servers (scheduling, service discovery, Consul DNS —
   services address each other as `*.service.consul`).

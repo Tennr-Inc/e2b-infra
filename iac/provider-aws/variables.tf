@@ -29,15 +29,27 @@ variable "ingress_certificate_arn" {
   }
 }
 
+variable "ingress_certificate_validation_zone_id" {
+  type        = string
+  description = "Optional public Route53 hosted zone ID where Terraform should create ACM validation records"
+  default     = ""
+
+  validation {
+    condition     = var.ingress_certificate_validation_zone_id == "" || can(regex("^Z[A-Z0-9]+$", var.ingress_certificate_validation_zone_id))
+    error_message = "ingress_certificate_validation_zone_id must be empty or a Route53 hosted zone ID."
+  }
+}
+
 variable "ingress_allowed_cidr_blocks" {
   type        = list(string)
   description = "IPv4 CIDRs allowed to reach the private ALB on HTTPS"
+  default     = []
 
   validation {
-    condition = length(var.ingress_allowed_cidr_blocks) > 0 && alltrue([
+    condition = alltrue([
       for cidr in var.ingress_allowed_cidr_blocks : can(cidrhost(cidr, 0)) && cidr != "0.0.0.0/0"
     ])
-    error_message = "Provide at least one valid CIDR, and do not allow 0.0.0.0/0."
+    error_message = "ingress_allowed_cidr_blocks must contain valid CIDRs and must not allow 0.0.0.0/0."
   }
 }
 
@@ -181,6 +193,19 @@ variable "postgres_engine_version" {
   type        = string
   description = "Pinned PostgreSQL engine version"
   default     = "16.11"
+}
+
+variable "postgres_admin_ingress_security_group_ids" {
+  type        = list(string)
+  description = "Additional security groups allowed to administer private RDS, such as a Twingate connector in the E2B VPC"
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for security_group_id in var.postgres_admin_ingress_security_group_ids : can(regex("^sg-[0-9a-f]+$", security_group_id))
+    ])
+    error_message = "postgres_admin_ingress_security_group_ids must contain only AWS security group IDs."
+  }
 }
 
 variable "postgres_instance_class" {
