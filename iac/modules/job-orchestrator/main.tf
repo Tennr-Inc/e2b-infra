@@ -33,7 +33,10 @@ resource "random_id" "orchestrator_job" {
 }
 
 locals {
-  latest_orchestrator_job_id = var.environment == "dev" ? "dev" : random_id.orchestrator_job.hex
+  # Providers without version-constrained node metadata replace a stable job
+  # in place. Keeping this ID known during planning avoids the Nomad provider
+  # changing an Update into DeleteThenCreate while applying a saved plan.
+  latest_orchestrator_job_id = var.environment == "dev" || !var.version_constraint_enabled ? var.environment : random_id.orchestrator_job.hex
 }
 
 resource "nomad_variable" "orchestrator_hash" {
