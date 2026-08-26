@@ -15,6 +15,8 @@ set -x
 # Inspired by https://alestic.com/2010/12/ec2-user-data-output/
 exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
 
+${INSTANCE_STORE_SETUP}
+
 mkdir -p /orchestrator
 mkdir -p /orchestrator/sandbox
 mkdir -p /orchestrator/template
@@ -63,33 +65,23 @@ EOH
 udevadm control --reload-rules
 udevadm trigger
 
-# Load the nbd module with 4096 devices
-modprobe nbd nbds_max=4096
-
 # Create the directory for the fc mounts
 mkdir -p /fc-vm
 
-# Mount envd buckets
-# disable_noobj_cache: s3fs caches negative lookups for stat_cache_expire (900s
-# default), hiding freshly uploaded envd/kernel/FC versions until the entry expires.
-envd_dir="/fc-envd"
-mkdir -p $envd_dir
-s3fs "${FC_ENV_PIPELINE_BUCKET_NAME}" "$envd_dir" -o allow_other -o umask=000 -o nonempty -o iam_role -o disable_noobj_cache
-
-# Mount kernels
-kernels_dir="/fc-kernels"
-mkdir -p $kernels_dir
-s3fs "${FC_KERNELS_BUCKET_NAME}" "$kernels_dir" -o allow_other -o umask=000 -o nonempty -o iam_role -o disable_noobj_cache
-
-# Mount FC versions
-fc_versions_dir="/fc-versions"
-mkdir -p $fc_versions_dir
-s3fs "${FC_VERSIONS_BUCKET_NAME}" "$fc_versions_dir" -o allow_other -o umask=000 -o nonempty -o iam_role -o disable_noobj_cache
-
-# Mount busybox
-busybox_dir="/fc-busybox"
-mkdir -p $busybox_dir
-s3fs "${FC_BUSYBOX_BUCKET_NAME}" "$busybox_dir" -o allow_other -o umask=000 -o nonempty -o iam_role -o disable_noobj_cache
+# Persist mount definitions, but let Nomad's startup hook mount them after
+# Consul can supply DNS. noauto avoids a boot dependency cycle with Supervisor.
+# disable_noobj_cache prevents stale negative lookups for newly uploaded binaries.
+mkdir -p /fc-envd /fc-kernels /fc-versions /fc-busybox /mnt/hugepages
+cat >> /etc/fstab <<EOF
+${FC_ENV_PIPELINE_BUCKET_NAME} /fc-envd fuse.s3fs noauto,_netdev,allow_other,umask=000,nonempty,iam_role=auto,disable_noobj_cache 0 0
+${FC_KERNELS_BUCKET_NAME} /fc-kernels fuse.s3fs noauto,_netdev,allow_other,umask=000,nonempty,iam_role=auto,disable_noobj_cache 0 0
+${FC_VERSIONS_BUCKET_NAME} /fc-versions fuse.s3fs noauto,_netdev,allow_other,umask=000,nonempty,iam_role=auto,disable_noobj_cache 0 0
+${FC_BUSYBOX_BUCKET_NAME} /fc-busybox fuse.s3fs noauto,_netdev,allow_other,umask=000,nonempty,iam_role=auto,disable_noobj_cache 0 0
+none /mnt/hugepages hugetlbfs noauto 0 0
+EOF
+printf '%s' '${PREPARE_HOST_SCRIPT_BASE64}' | base64 --decode > /opt/nomad/bin/prepare-host.sh
+chmod 0755 /opt/nomad/bin/prepare-host.sh
+/opt/nomad/bin/prepare-host.sh
 
 # These variables are passed in via Terraform template interpolation
 aws s3 cp "s3://${SCRIPTS_BUCKET}/run-consul-${RUN_CONSUL_FILE_HASH}.sh" /opt/consul/bin/run-consul.sh
@@ -118,77 +110,43 @@ DNSStubListenerExtra=172.17.0.1
 EOF
 sync  # Ensure file is written to disk
 
-# Set up huge pages
-# We are not enabling Transparent Huge Pages for now, as they are not swappable and may result in slowdowns + we are not using swap right now.
-# The THP are by default set to madvise
-# We are allocating the hugepages at the start when the memory is not fragmented yet
+# Allocate the shared hugepage pool before Nomad can accept sandboxes. Dynamic
+# hugepages still use the rest of the existing budget; this is not per guest.
 echo "[Setting up huge pages]"
-mkdir -p /mnt/hugepages
-mount -t hugetlbfs none /mnt/hugepages
-# Increase proactive compaction to reduce memory fragmentation for using overcomitted huge pages
+install -d -m 0755 /opt/e2b/bin
+printf '%s' '${HUGEPAGES_SCRIPT_BASE64}' | base64 --decode > /opt/e2b/bin/hugepages.sh
+chmod 0755 /opt/e2b/bin/hugepages.sh
 
-available_ram=$(grep MemTotal /proc/meminfo | awk '{print $2}') # in KiB
-available_ram=$(($available_ram / 1024))                        # in MiB
-echo "- Total memory: $available_ram MiB"
+available_ram=$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo)
+hugepage_plan=$(/opt/e2b/bin/hugepages.sh plan "$available_ram" ${RESERVED_HOST_MEMORY_MIB} ${BASE_HUGEPAGES_PERCENTAGE})
+read -r reserved_normal_ram base_hugepages overcommitment_hugepages <<< "$hugepage_plan"
+echo "- Total memory: $available_ram MiB; host reserve: $reserved_normal_ram MiB"
+echo "- Shared base pool: $base_hugepages pages; dynamic limit: $overcommitment_hugepages pages (2 MiB each)"
 
-min_normal_ram=$((4 * 1024))                             # 4 GiB
-min_normal_percentage_ram=$(($available_ram * 16 / 100)) # 16% of the total memory
-max_normal_ram=$((42 * 1024))                            # 42 GiB
+cat > /etc/sysctl.d/90-e2b-hugepages.conf <<EOF
+vm.nr_overcommit_hugepages=$overcommitment_hugepages
+vm.nr_hugepages=$base_hugepages
+EOF
 
-max() {
-    if (($1 > $2)); then
-        echo "$1"
-    else
-        echo "$2"
-    fi
-}
+# Nomad is managed by Supervisor. Its pre-start check also protects reboots,
+# when cloud-init user data does not run again and sysctl may allocate fewer
+# pages than requested. Do not restart Supervisor or existing workloads here.
+mkdir -p /etc/systemd/system/supervisor.service.d
+cat > /etc/systemd/system/supervisor.service.d/hugepages.conf <<EOF
+[Unit]
+After=systemd-sysctl.service
 
-min() {
-    if (($1 < $2)); then
-        echo "$1"
-    else
-        echo "$2"
-    fi
-}
+[Service]
+ExecStartPre=/opt/e2b/bin/hugepages.sh verify $base_hugepages $overcommitment_hugepages
+EOF
+systemctl daemon-reload
 
-ensure_even() {
-    if (($1 % 2 == 0)); then
-        echo "$1"
-    else
-        echo $(($1 - 1))
-    fi
-}
+sysctl -w vm.nr_overcommit_hugepages="$overcommitment_hugepages"
+sysctl -w vm.nr_hugepages="$base_hugepages"
+# Supervisor is already running during first boot, so verify explicitly too.
+/opt/e2b/bin/hugepages.sh verify "$base_hugepages" "$overcommitment_hugepages"
 
-remove_decimal() {
-    echo "$(echo $1 | sed 's/\..*//')"
-}
-
-reserved_normal_ram=$(max $min_normal_ram $min_normal_percentage_ram)
-reserved_normal_ram=$(min $reserved_normal_ram $max_normal_ram)
-echo "- Reserved RAM: $reserved_normal_ram MiB"
-
-# The huge pages RAM should still be usable for normal pages in most cases.
-hugepages_ram=$(($available_ram - $reserved_normal_ram))
-hugepages_ram=$(remove_decimal $hugepages_ram)
-hugepages_ram=$(ensure_even $hugepages_ram)
-echo "- RAM for hugepages: $hugepages_ram MiB"
-
-hugepage_size_in_mib=2
-echo "- Huge page size: $hugepage_size_in_mib MiB"
-hugepages=$(($hugepages_ram / $hugepage_size_in_mib))
-
-# This percentage will be permanently allocated for huge pages and in monitoring it will be shown as used.
-base_hugepages_percentage=${BASE_HUGEPAGES_PERCENTAGE}
-base_hugepages=$(($hugepages * $base_hugepages_percentage / 100))
-base_hugepages=$(remove_decimal $base_hugepages)
-echo "- Allocating $base_hugepages huge pages ($base_hugepages_percentage%) for base usage"
-echo $base_hugepages >/proc/sys/vm/nr_hugepages
-
-overcommitment_hugepages_percentage=$((100 - $base_hugepages_percentage))
-overcommitment_hugepages=$(($hugepages * $overcommitment_hugepages_percentage / 100))
-overcommitment_hugepages=$(remove_decimal $overcommitment_hugepages)
-echo "- Allocating $overcommitment_hugepages huge pages ($overcommitment_hugepages_percentage%) for overcommitment"
-echo $overcommitment_hugepages >/proc/sys/vm/nr_overcommit_hugepages
+${CAPACITY_REPORTER_SETUP}
 
 # Start Consul first (in background) with GCE DNS as recursor
 # This allows Consul to handle both .consul queries AND forward internet queries

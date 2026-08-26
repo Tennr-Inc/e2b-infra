@@ -10,6 +10,16 @@ variable "aws_region" {
   type = string
 }
 
+variable "ebs_kms_key_arn" {
+  type        = string
+  description = "Customer-managed KMS key ARN for all node EBS volumes"
+}
+
+variable "s3_kms_key_arn" {
+  type        = string
+  description = "Customer-managed KMS key ARN for E2B S3 application data"
+}
+
 variable "vpc_private_subnets" {
   type = list(string)
 }
@@ -130,9 +140,17 @@ variable "client_node_pool_name" {
 }
 
 variable "client_base_hugepages_percentage" {
-  description = "The percentage of memory to use for preallocated hugepages."
+  description = "Percentage of RAM after the host reserve to preallocate as a shared node hugepage pool."
   type        = number
-  default     = 60
+  default     = 0
+}
+
+variable "client_max_cluster_size" {
+  type = number
+}
+
+variable "client_reserved_host_memory_mib" {
+  type = number
 }
 
 variable "client_image_family_prefix" {
@@ -179,7 +197,7 @@ variable "build_cluster_size" {
 
 variable "build_machine_type" {
   type    = string
-  default = "m8i.2xlarge"
+  default = "m8i.4xlarge"
 }
 
 variable "build_server_nested_virtualization" {
@@ -237,4 +255,10 @@ variable "clickhouse_backups_bucket_name" {
 
 variable "custom_environments_repository_name" {
   type = string
+}
+
+variable "client_use_instance_store" {
+  description = "Mount a dedicated local NVMe instance-store disk as the orchestrator XFS cache. Requires an instance type with local storage."
+  type        = bool
+  default     = false
 }

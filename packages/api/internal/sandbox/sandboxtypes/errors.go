@@ -39,6 +39,9 @@ var ErrAlreadyExists = errors.New("sandbox already exists")
 
 var ErrEvictionInProgress = errors.New("sandbox eviction already in progress")
 
+// ErrDraining leaves the sandbox running for a pause on another API replica.
+var ErrDraining = errors.New("api is draining")
+
 var ErrEvictionNotNeeded = errors.New("sandbox eviction not needed")
 
 // ErrExecutionMismatch reports that the stored sandbox is a different

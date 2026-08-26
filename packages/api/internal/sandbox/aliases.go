@@ -49,6 +49,7 @@ const (
 
 // Errors and pre-defined state actions / transition tables.
 var (
+	ErrDraining           = sandboxtypes.ErrDraining
 	ErrAlreadyExists      = sandboxtypes.ErrAlreadyExists
 	ErrNotFound           = sandboxtypes.ErrNotFound
 	ErrEvictionInProgress = sandboxtypes.ErrEvictionInProgress

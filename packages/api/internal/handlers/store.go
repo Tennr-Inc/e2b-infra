@@ -389,6 +389,15 @@ func NewAPIStore(ctx context.Context, tel *telemetry.Client, redisClient redis.U
 	return a
 }
 
+// Drain waits for accepted pauses before Close tears down their dependencies.
+func (a *APIStore) Drain(ctx context.Context) error {
+	if a.orchestrator == nil {
+		return nil
+	}
+
+	return a.orchestrator.Drain(ctx)
+}
+
 func (a *APIStore) Close(ctx context.Context) error {
 	a.templateSpawnCounter.Close(ctx)
 

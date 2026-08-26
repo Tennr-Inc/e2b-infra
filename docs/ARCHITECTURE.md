@@ -169,7 +169,11 @@ Key mechanisms (all under `pkg/sandbox/`):
   Guest metadata (sandbox ID, envd access token hash) is passed via MMDS.
 - **Lazy memory / UFFD** (`uffd/`): on resume, Firecracker restores the VM without loading
   memory; a userfaultfd handler serves page faults directly from the template's memfile, so only
-  touched pages are read. An optional prefetcher warms known-hot pages.
+  touched pages are read. An optional prefetcher warms known-hot pages. When Firecracker shares
+  a guest-memory memfd, the orchestrator maps its read-only view with `MAP_SHARED | MAP_NORESERVE`,
+  matching Firecracker's lazy allocation policy. This avoids reserving hugepages for the entire
+  configured guest RAM just to observe it; populating guest pages still requires available
+  physical hugepages.
 - **Copy-on-write rootfs** (`rootfs/`, `nbd/`, `block/`): the template rootfs stays read-only;
   writes go to a per-sandbox COW cache exposed to Firecracker as an NBD block device served by
   an in-process userspace NBD server. On pause, the dirty blocks are exported as a diff.
@@ -317,6 +321,15 @@ gets a response, the sandbox is fully usable. Fresh creates are internally a *re
 template's base snapshot (cold boots happen for filesystem-only templates and builds, or when
 an explicit resume requests one — see pause and resume below; template creates never do).
 
+The API captures the effective `team_limits.max_length_hours` in each running sandbox's
+`MaxInstanceLength`. Reconnect and timeout updates are capped at that sandbox's start time plus
+the captured lifetime; changing the database does not extend existing sandboxes. The self-hosted
+`base_v1` tier and existing base-tier project overrides support at least 24 hours, preserving
+longer operator-configured lifetimes. Other limits and tiers are unchanged. The client's requested
+timeout can be shorter; Tot requests 24 hours and retains kill-on-timeout. See
+[sandbox lifetime rollout](sandbox-lifetime-rollout.md) for migration order, cache propagation,
+and the effect on existing allocations.
+
 ### Sandbox traffic
 
 ```mermaid
@@ -387,6 +400,12 @@ sequenceDiagram
   orchestrator pauses the VM, snapshots it, diffs memory (dirty-page tracking) and rootfs (COW
   cache) against the template, caches the snapshot locally, and uploads asynchronously to object
   storage (with a retry budget). The sandbox leaves the Redis catalog.
+  Once the API acquires the pause transition, routing cleanup, snapshot DB upsert, and the node
+  RPC share a detached 80-second budget; the Redis transition key has a 95-second TTL. Caller
+  cancellation does not abandon an accepted pause. Terminal build-status writes have their own
+  detached 10-second budget. API shutdown drains accepted pauses after HTTP/gRPC drain and before
+  closing DB/Redis, refusing new pauses with retryable 503s while draining. Snapshot uploads and
+  sandbox teardown retain their separate background lifetimes.
   - **Deferred rootfs export** (gated by the `deferred-rootfs-export` flag in
     `packages/shared/pkg/featureflags`): instead of diffing the rootfs on the pause critical
     path, the orchestrator ejects the writable COW cache during pause and returns, then seals it
@@ -470,10 +489,19 @@ steps. Resize disk grows the quiescent rootfs on the host; the other non-cached 
 Firecracker VM and their pause-diffs become layers. The optimize phase records which memory pages a
 fresh resume touches, producing prefetch hints that speed up future sandbox starts.
 
+COPY layers are downloaded by template-manager, uploaded into the build VM under the rootfs-backed
+`/var/lib/e2b/template-build/<files-hash>` directory, extracted there, merged into the target, and
+then removed explicitly. They must not use guest `/tmp`: `rcS` mounts `/tmp` as tmpfs, which would
+otherwise require the compressed archive and expanded tree to fit in roughly half of guest RAM.
+Build logs report `df -Pk / /tmp` before staging, after extraction, and after cleanup so rootfs and
+tmpfs headroom are observable independently. API build registration takes initial rootfs free space
+from the project's effective `team_limits.default_free_disk_size_mb`, not the legacy `disk_mb`
+column.
+
 ## Deployment topology
 
-Deployed with **Terraform** (`iac/provider-gcp/`, `iac/provider-aws/`) onto a **Nomad + Consul**
-cluster. Nomad job specs live in `iac/modules/job-*/jobs/*.hcl`.
+Deployed with **OpenTofu/Terraform** (`iac/provider-gcp/`, `iac/provider-aws/`) onto a **Nomad +
+Consul** cluster. Nomad job specs live in `iac/modules/job-*/jobs/*.hcl`.
 
 ```mermaid
 flowchart TB
@@ -500,16 +528,86 @@ flowchart TB
     NS -.->|schedules jobs| apipool & clientpool & buildpool & chpool
 ```
 
+The private AWS deployment places this topology in a dedicated E2B account and VPC. Its Application
+Load Balancer is internal and listens only on HTTPS. An internal Network Load Balancer targets that
+ALB and publishes a VPC endpoint service. The ALB idle timeout is 90 seconds, above the API's
+75-second HTTP write deadline; the API request deadline remains 70 seconds. The detached pause
+budget protects snapshot completion even when the caller can no longer receive the response.
+Explicitly allowed Tennr accounts create interface endpoints in their own VPCs and private wildcard DNS records that alias the local endpoint. The
+consumer VPCs exchange no routes with E2B, and E2B cannot initiate traffic into them. Public subnets
+exist only to host the NAT gateway used for outbound traffic from private E2B nodes and sandboxes.
+
+The wildcard certificate still requires a publicly resolvable ACM ownership-validation CNAME. An
+optional public Route53 zone ID lets OpenTofu manage that CNAME; it never receives an ALB alias or
+other service record. RDS can separately allow explicit private-access connector security groups
+inside the E2B VPC, keeping exceptional operator access narrower than an entire VPC CIDR.
+
+PrivateLink is an ingress path, not a sandbox firewall exception. Sandbox RFC1918 ranges
+remain denied unless operators populate `ALLOW_SANDBOX_INTERNAL_CIDRS`; any such entry applies to
+all sandboxes on that orchestrator fleet and must therefore identify only a dedicated, authenticated
+gateway endpoint rather than a Tennr or E2B VPC.
+
+Public sandbox egress remains available through NAT unless the sandbox create/update network config
+supplies an `allowOut` list or denies all internet access. Domain allowlists are per sandbox, not a
+template or Terraform default. An internal destination must pass both the per-sandbox domain/CIDR
+policy and the fleet-wide `ALLOW_SANDBOX_INTERNAL_CIDRS` exception. The exception should therefore
+cover only a narrow, authenticated gateway CIDR. Consumer endpoint security groups independently
+restrict which Tennr workloads and private-access connectors can initiate HTTPS connections to E2B.
+
+The AWS data plane uses separate rotating customer-managed KMS keys for EBS, RDS, and application
+S3 data. ALB access logs retain SSE-S3 because that delivery integration has separate encryption
+support. The data plane uses an encrypted, private RDS PostgreSQL instance and, when
+`REDIS_MANAGED=true`, an encrypted Multi-AZ ElastiCache Valkey replication group. Both live in
+isolated data subnets and accept traffic only from the E2B cluster-node security group. Terraform
+generates the PostgreSQL credentials, requires TLS in the connection string consumed by the Nomad
+jobs, and writes that string to AWS Secrets Manager. The migrator creates a no-login `postgres`
+compatibility role when a managed database uses a differently named master user, because historical
+migrations grant privileges to that conventional role. Neither datastore is exposed through the
+ALB or a public endpoint.
+
 - **Server nodes** run only Nomad/Consul servers (scheduling, service discovery, Consul DNS —
   services address each other as `*.service.consul`).
 - **API nodes** host every control-plane container and are the only LB backend.
 - **Sandbox ("client") nodes** run the orchestrator as a Nomad *system* job via `raw_exec`
   (it needs root for Firecracker, namespaces, NBD, cgroups). Configured with hugepages and local
-  template caches. Autoscaled.
+  template caches. The shared AWS pool uses `m8id.4xlarge` with its 950 GB local NVMe disk
+  mounted at `/orchestrator` as XFS with reflink. Sandbox COW files and exported diffs share this
+  filesystem. `client_use_instance_store` opts a pool into this configuration; other pools retain
+  their EBS caches. A checksum-named bootstrap script is downloaded from the private setup bucket
+  and runs before every Nomad start. It only formats a blank EC2 instance-store disk, preserves
+  existing managed XFS on reboot, and refuses foreign disks or a missing/incorrect mount. EC2
+  stop/start loses this cache; durable snapshots remain in S3 and can resume on compatible nodes.
+  The task receives SIGTERM with up to 24 hours of Nomad shutdown grace
+  (the client maximum), allowing the existing live-sandbox drain and background snapshot uploads
+  to finish. Nodes must still be pre-drained before replacement, with uploads verified complete;
+  a grace-period ceiling is not a durability guarantee. API tasks have 240 seconds of grace for
+  health propagation, HTTP/gRPC drain, detached pauses, and cleanup.
+  AWS sandbox nodes budget huge pages up to physical RAM less
+  `client_reserved_host_memory_mib` (4 GiB by default). The shared environment explicitly sets
+  `CLIENT_BASE_HUGEPAGES_PERCENTAGE=10`: a per-node pool of 10% of that budget (about 6 GiB on
+  a 64 GiB node) is allocated at boot, with the remaining pages available dynamically. The generic
+  Terraform default stays 0%; build nodes retain their separate 60% pool and host-reserve policy.
+  Initial startup verifies the actual kernel allocation before Nomad registration; a Supervisor
+  pre-start check repeats this after reboots. A shortfall blocks startup and logs requested and
+  actual page counts. Nomad's worker startup hook also restores the NBD module and required
+  binary/hugetlbfs mounts before accepting work. S3 mounts retry while the separately started
+  Consul DNS becomes available. This shared pool does not reserve each sandbox's configured RAM or change
+  lazy page loading. Existing snapshots still require huge pages; ordinary free RAM alone does
+  not indicate sandbox capacity, and dynamic allocation can still fail from fragmentation.
+  A systemd timer publishes `E2B/Capacity/SandboxMemoryUtilization` every minute, combining
+  used plus reserved huge pages and physical memory pressure, excluding unused, unreserved pool
+  pages. Preallocation reduces memory available for ordinary page caches. Because memfd mappings do not
+  reserve the full guest RAM, this metric reflects current backing demand rather than the sum
+  of configured guest limits; it does not guarantee capacity for future guest growth. The AWS
+  Auto Scaling Group targets 70% memory utilization and 70% CPU independently, with a 10-minute instance warmup and
+  `client_cluster_size` / `client_max_cluster_size` bounds (1–20 by default). Policies only scale
+  out, and new nodes have scale-in protection: removing a node requires draining its sandboxes
+  first. New nodes join Nomad and receive the orchestrator system job automatically.
 - **Build nodes** run the same binary in template-manager mode; the `nomad-nodepool-apm`
   autoscaler plugin scales the job with the node pool.
-- PostgreSQL is external (connection string via secrets); Redis runs as a Nomad job or as a
-  managed service; ClickHouse runs on its own pool.
+- On AWS, PostgreSQL runs in private RDS and Redis runs as a Nomad job or private managed Valkey;
+  other providers can supply an external PostgreSQL connection string. ClickHouse runs on its own
+  pool.
 - Observability: everything exports OTel; the collector fans out to ClickHouse (product metrics)
   and Grafana Cloud/stack. Logs default to the legacy Vector → Loki path; dynamic log routing can
   select a primary collector and shadow collectors, and local-cluster log reads can be switched to

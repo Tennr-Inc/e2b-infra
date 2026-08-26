@@ -24,6 +24,12 @@ variable "orchestrator_checksum" {
   description = "Hex checksum of the orchestrator binary, used for change detection"
 }
 
+variable "version_constraint_enabled" {
+  description = "Whether orchestrator jobs require matching orchestrator_job_version node metadata"
+  type        = bool
+  default     = true
+}
+
 variable "job_env_vars" {
   type      = map(string)
   default   = {}

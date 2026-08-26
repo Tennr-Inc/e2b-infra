@@ -54,9 +54,30 @@ variable "cluster_size" {
   default = 1
 }
 
+variable "max_cluster_size" {
+  description = "Null keeps a fixed-size pool; a larger value enables scale-out only."
+  type        = number
+  default     = null
+
+  validation {
+    condition     = var.max_cluster_size == null ? true : var.max_cluster_size >= var.cluster_size && floor(var.max_cluster_size) == var.max_cluster_size
+    error_message = "The maximum size must be an integer at least cluster_size."
+  }
+}
+
+variable "reserved_host_memory_mib" {
+  description = "Explicit host RAM reserve. Null retains the build-node percentage-based reserve."
+  type        = number
+  default     = null
+}
+
 variable "machine_type" {
   type    = string
   default = "m8i.4xlarge"
+}
+
+variable "ebs_kms_key_arn" {
+  type = string
 }
 
 variable "node_pool_name" {
@@ -150,4 +171,10 @@ variable "scripts_path" {
   type        = string
   description = "Path to the directory containing startup scripts. Defaults to in-module scripts."
   default     = ""
+}
+
+variable "use_instance_store" {
+  description = "Mount a dedicated local NVMe instance-store disk as the orchestrator XFS cache. Requires an instance type with local storage."
+  type        = bool
+  default     = false
 }

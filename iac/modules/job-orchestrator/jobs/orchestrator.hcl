@@ -17,7 +17,7 @@ job "orchestrator-${latest_orchestrator_job_id}" {
       }
     }
 
-%{ if latest_orchestrator_job_id != "dev" }
+%{ if version_constraint_enabled && latest_orchestrator_job_id != "dev" }
     constraint {
       attribute = "$${meta.orchestrator_job_version}"
       value     = "${latest_orchestrator_job_id}"
@@ -56,6 +56,12 @@ job "orchestrator-${latest_orchestrator_job_id}" {
     task "start" {
       driver = "raw_exec"
 
+      # The process drains live sandboxes, then pending snapshot uploads.
+      # Matches the Nomad client cap; pre-drain nodes before replacement.
+      # This is a ceiling, not a delay: an empty node exits immediately after cleanup.
+      kill_timeout = "24h"
+      kill_signal  = "SIGTERM"
+
       restart {
         attempts = 0
       }
@@ -81,7 +87,7 @@ job "orchestrator-${latest_orchestrator_job_id}" {
 
       config {
         command = "/bin/bash"
-        args    = ["-c", " chmod +x local/orchestrator && local/orchestrator"]
+        args    = ["-c", " chmod +x local/orchestrator && exec local/orchestrator"]
       }
 
       artifact {

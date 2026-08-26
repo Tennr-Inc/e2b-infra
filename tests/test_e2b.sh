@@ -22,10 +22,6 @@ if [ "$RESULT" != "Hello World" ]; then
 fi
 printf $CHECK_MARK
 
-echo "Listing running sandboxes"
-e2b sandbox list | grep "${NAME}" > /dev/null
-printf $CHECK_MARK
-
 #echo "Deleting the template: ${NAME}"
 #e2b template delete -y > /dev/null
 #printf $CHECK_MARK

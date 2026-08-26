@@ -1,7 +1,14 @@
 locals {
-  scripts_path = var.scripts_path != "" ? var.scripts_path : "${path.module}/scripts"
+  scripts_path        = var.scripts_path != "" ? var.scripts_path : "${path.module}/scripts"
+  autoscaling_enabled = coalesce(var.max_cluster_size, var.cluster_size) > var.cluster_size
 
   user_data = templatefile("${local.scripts_path}/start-client.sh", {
+    INSTANCE_STORE_SETUP = var.use_instance_store ? join("\n", [
+      "install -d -m 0755 /opt/e2b/bin",
+      "touch /opt/e2b/instance-store-required",
+      "aws s3 cp s3://${var.setup_bucket_name}/${aws_s3_object.instance_store_setup[0].key} /opt/e2b/bin/instance-store.py",
+      "python3 /opt/e2b/bin/instance-store.py",
+    ]) : ""
     NODE_POOL                    = var.node_pool_name
     CLUSTER_TAG_NAME             = var.cluster_tag_name
     CLUSTER_TAG_VALUE            = var.cluster_tag_value
@@ -16,12 +23,27 @@ locals {
     FC_BUSYBOX_BUCKET_NAME      = var.fc_busybox_bucket_name
     NODE_LABELS                 = join(",", var.node_labels)
     BASE_HUGEPAGES_PERCENTAGE   = var.base_hugepages_percentage
+    RESERVED_HOST_MEMORY_MIB    = coalesce(var.reserved_host_memory_mib, 0)
+    HUGEPAGES_SCRIPT_BASE64     = filebase64("${path.module}/scripts/hugepages.sh")
+    PREPARE_HOST_SCRIPT_BASE64  = filebase64("${path.module}/scripts/prepare-host.sh")
+    CAPACITY_REPORTER_SETUP = local.autoscaling_enabled ? templatefile("${path.module}/scripts/install-capacity-reporter.sh.tftpl", {
+      reporter_base64 = filebase64("${path.module}/scripts/report-capacity.py")
+      asg_name        = "${var.prefix}${var.name}"
+      aws_region      = data.aws_region.current.id
+    }) : ""
 
     AWS_ECR_ACCOUNT_REPOSITORY_DOMAIN = var.aws_ecr_account_repository_domain
 
     RUN_CONSUL_FILE_HASH = var.setup_files_hash["run-consul"]
     RUN_NOMAD_FILE_HASH  = var.setup_files_hash["run-nomad"]
   })
+}
+
+resource "aws_s3_object" "instance_store_setup" {
+  count  = var.use_instance_store ? 1 : 0
+  bucket = var.setup_bucket_name
+  key    = "instance-store-${filesha256("${path.module}/scripts/instance-store.py")}.py"
+  source = "${path.module}/scripts/instance-store.py"
 }
 
 resource "aws_iam_policy" "client_node_policy" {
@@ -126,7 +148,12 @@ resource "aws_launch_template" "client" {
   name          = "${var.prefix}${var.name}-node"
   image_id      = data.aws_ami.client.id
   instance_type = var.machine_type
-  user_data     = base64encode(local.user_data)
+  # Compress the NVMe bootstrap to keep user data within EC2's 16 KiB limit.
+  user_data = var.use_instance_store ? base64gzip(local.user_data) : base64encode(local.user_data)
+
+  monitoring {
+    enabled = local.autoscaling_enabled
+  }
 
   vpc_security_group_ids = var.security_group_ids
 
@@ -145,6 +172,8 @@ resource "aws_launch_template" "client" {
       volume_size           = var.boot_disk_size_gb
       volume_type           = "gp3"
       delete_on_termination = true
+      encrypted             = true
+      kms_key_id            = var.ebs_kms_key_arn
     }
   }
 
@@ -169,8 +198,10 @@ resource "aws_autoscaling_group" "client" {
   vpc_zone_identifier = var.vpc_private_subnets
   health_check_type   = "EC2"
 
-  min_size = var.cluster_size
-  max_size = var.cluster_size
+  min_size                = var.cluster_size
+  max_size                = coalesce(var.max_cluster_size, var.cluster_size)
+  default_instance_warmup = local.autoscaling_enabled ? 600 : null
+  protect_from_scale_in   = local.autoscaling_enabled
 
   launch_template {
     id      = aws_launch_template.client.id

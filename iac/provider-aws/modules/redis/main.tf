@@ -9,13 +9,6 @@ resource "aws_security_group" "instance" {
     security_groups = var.ingress_security_group_ids
   }
 
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
   tags = {
     Name = "${var.prefix}${var.name}"
   }
@@ -30,12 +23,15 @@ resource "aws_elasticache_replication_group" "instance" {
   replicas_per_node_group = var.replica_size - 1
 
   automatic_failover_enabled = true
+  multi_az_enabled           = true
+  at_rest_encryption_enabled = true
   transit_encryption_enabled = true
   transit_encryption_mode    = "required"
 
-  engine               = "valkey"
-  engine_version       = "8.2"
-  parameter_group_name = "default.valkey8.cluster.on"
+  engine                   = "valkey"
+  engine_version           = "8.2"
+  parameter_group_name     = "default.valkey8.cluster.on"
+  snapshot_retention_limit = var.snapshot_retention_limit
 
   port              = var.port
   subnet_group_name = var.subnet_group_name
