@@ -20,8 +20,9 @@ variables {
   bucket_prefix = "e2b-stg-test-"
   domain_name   = "e2b.staging.internal.example.com"
 
-  ingress_certificate_arn     = "arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-0000-0000-000000000000"
-  ingress_allowed_cidr_blocks = ["10.20.0.0/16"]
+  ingress_certificate_arn            = "arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+  ingress_allowed_cidr_blocks        = ["10.20.0.0/16"]
+  ingress_allowed_security_group_ids = ["sg-0123456789abcdef0"]
 
   vpc_cidr                = "10.30.0.0/16"
   vpc_availability_zones  = ["us-east-1a", "us-east-1b", "us-east-1c"]
@@ -57,8 +58,13 @@ run "private_staging_topology" {
   }
 
   assert {
-    condition     = length(aws_security_group.ingress.ingress) == 1 && alltrue([for rule in aws_security_group.ingress.ingress : rule.from_port == 443 && rule.to_port == 443 && length(rule.cidr_blocks) == 1 && contains(rule.cidr_blocks, "10.20.0.0/16")])
-    error_message = "Ingress must be limited to HTTPS from the configured staging CIDR."
+    condition = (
+      length(aws_security_group.ingress.ingress) == 2 &&
+      alltrue([for rule in aws_security_group.ingress.ingress : rule.from_port == 443 && rule.to_port == 443]) &&
+      length([for rule in aws_security_group.ingress.ingress : rule if try(contains(rule.cidr_blocks, "10.20.0.0/16"), false)]) == 1 &&
+      length([for rule in aws_security_group.ingress.ingress : rule if try(contains(rule.security_groups, "sg-0123456789abcdef0"), false)]) == 1
+    )
+    error_message = "Ingress must be limited to HTTPS from the configured staging CIDR and security group."
   }
 
   assert {
@@ -108,6 +114,11 @@ run "managed_redis_topology" {
     condition     = module.redis[0].security_posture.multi_az_enabled && module.redis[0].security_posture.automatic_failover_enabled
     error_message = "Managed Redis must use Multi-AZ automatic failover."
   }
+
+  assert {
+    condition     = can(regex("^[^:]+:6379$", local.redis_cluster_url)) && local.redis_tls_enabled == "true"
+    error_message = "Managed Redis must use a bare host:port address while enabling TLS separately."
+  }
 }
 
 run "managed_certificate" {
@@ -131,6 +142,16 @@ run "reject_public_ingress" {
   }
 
   expect_failures = [var.ingress_allowed_cidr_blocks]
+}
+
+run "reject_invalid_ingress_security_group" {
+  command = plan
+
+  variables {
+    ingress_allowed_security_group_ids = ["not-a-security-group"]
+  }
+
+  expect_failures = [var.ingress_allowed_security_group_ids]
 }
 
 run "reject_incomplete_peering" {
