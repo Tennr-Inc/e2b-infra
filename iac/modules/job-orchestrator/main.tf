@@ -11,7 +11,8 @@ locals {
 
     artifact_source = var.artifact_source
 
-    job_env_vars = local.job_env_vars
+    job_env_vars               = local.job_env_vars
+    version_constraint_enabled = var.version_constraint_enabled
   }
 
   # Render with placeholder to detect changes in job definition
@@ -43,7 +44,9 @@ resource "nomad_variable" "orchestrator_hash" {
 }
 
 resource "nomad_job" "orchestrator" {
-  deregister_on_id_change = false
+  # Version-constrained pools keep old jobs registered while nodes roll between
+  # versions. AWS does not set that node metadata, so it replaces the old job.
+  deregister_on_id_change = !var.version_constraint_enabled
 
   jobspec = templatefile("${path.module}/jobs/orchestrator.hcl", merge(
     local.orchestrator_vars, {

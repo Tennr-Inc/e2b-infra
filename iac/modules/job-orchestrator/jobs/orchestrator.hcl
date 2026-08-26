@@ -17,7 +17,7 @@ job "orchestrator-${latest_orchestrator_job_id}" {
       }
     }
 
-%{ if latest_orchestrator_job_id != "dev" }
+%{ if version_constraint_enabled && latest_orchestrator_job_id != "dev" }
     constraint {
       attribute = "$${meta.orchestrator_job_version}"
       value     = "${latest_orchestrator_job_id}"
