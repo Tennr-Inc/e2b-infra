@@ -3,7 +3,7 @@ ENV_FILE := ../../.env.${ENV}
 
 -include ${ENV_FILE}
 
-TF := $(shell which terraform)
+TF ?= $(shell command -v tofu 2>/dev/null || command -v terraform 2>/dev/null)
 TF_VAR_FILE := ./.terraform.${ENV}.tfvars
 TF_VAR_FILE_ARG := $(if $(wildcard $(TF_VAR_FILE)),-var-file=$(TF_VAR_FILE))
 TERRAFORM_STATE_BUCKET ?= $(AWS_ACCOUNT_ID)-terraform-state
