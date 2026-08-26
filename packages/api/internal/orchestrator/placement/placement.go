@@ -10,6 +10,7 @@ import (
 
 	"github.com/e2b-dev/infra/packages/api/internal/orchestrator/nodemanager"
 	"github.com/e2b-dev/infra/packages/api/internal/utils"
+	e2bgrpc "github.com/e2b-dev/infra/packages/shared/pkg/grpc"
 	"github.com/e2b-dev/infra/packages/shared/pkg/grpc/orchestrator"
 	"github.com/e2b-dev/infra/packages/shared/pkg/logger"
 	"github.com/e2b-dev/infra/packages/shared/pkg/telemetry"
@@ -121,6 +122,9 @@ func PlaceSandbox(
 					return failed(SandboxCreateError{Attempts: attempt, LastErr: lastCreateErr})
 				}
 
+				if refusals > 0 {
+					return failed(NoNodesAvailableError{})
+				}
 				return failed(err)
 			}
 
@@ -171,6 +175,11 @@ func PlaceSandbox(
 		switch statusCode {
 		case codes.ResourceExhausted:
 			refusals++
+			if e2bgrpc.IsSandboxCapacityExhausted(st) {
+				// CPU scoring can keep choosing a worker whose RAM or slots
+				// are full. Skip it for this request; a new request can retry.
+				nodesExcluded[failedNode.ID] = struct{}{}
+			}
 			failedNode.PlacementMetrics.Skip(sbxRequest.GetSandbox().GetSandboxId())
 			logger.L().Warn(ctx, "Node exhausted, trying another node", logger.WithSandboxID(sbxRequest.GetSandbox().GetSandboxId()), logger.WithNodeID(failedNode.ID), zap.Error(utils.UnwrapGRPCError(err)))
 		default:

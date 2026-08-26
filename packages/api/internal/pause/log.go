@@ -18,6 +18,8 @@ const (
 type SkipReason string
 
 const (
+	// This replica leaves the sandbox running for a retry during shutdown.
+	SkipReasonDraining      SkipReason = "draining"
 	SkipReasonAlreadyPaused SkipReason = "already_paused"
 	SkipReasonNotEvictable  SkipReason = "not_evictable"
 	SkipReasonNotFound      SkipReason = "not_found"

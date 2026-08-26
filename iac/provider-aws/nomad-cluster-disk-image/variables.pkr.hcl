@@ -6,8 +6,13 @@ variable "aws_profile" {
   type = string
 }
 
+variable "ebs_kms_key_arn" {
+  type        = string
+  description = "Customer-managed KMS key ARN used to encrypt the AMI snapshot"
+}
+
 variable "source_ami_filter_name" {
-  type = string
+  type    = string
   default = "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"
 }
 

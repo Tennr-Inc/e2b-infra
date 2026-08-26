@@ -50,6 +50,9 @@ func formatMethod(method string) string {
 	return fmt.Sprintf("%s %s", servicePart, methodPart)
 }
 
+// NewUnaryLogInterceptor records operation metadata without RPC bodies. Bodies
+// can contain credentials, stdin, and file contents; process.List responses also
+// return the original process environment. Streaming logs follow the same rule.
 func NewUnaryLogInterceptor(logger *zerolog.Logger) connect.UnaryInterceptorFunc {
 	interceptor := func(next connect.UnaryFunc) connect.UnaryFunc {
 		return connect.UnaryFunc(func(
@@ -67,18 +70,6 @@ func NewUnaryLogInterceptor(logger *zerolog.Logger) connect.UnaryInterceptorFunc
 
 			if err != nil {
 				l = l.Int("error_code", int(connect.CodeOf(err)))
-			}
-
-			if req != nil {
-				l = l.Interface("request", req.Any())
-			}
-
-			if res != nil && err == nil {
-				l = l.Interface("response", res.Any())
-			}
-
-			if res == nil && err == nil {
-				l = l.Interface("response", nil)
 			}
 
 			l.Msg(formatMethod(req.Spec().Procedure))
@@ -103,10 +94,6 @@ func LogServerStreamWithoutEvents[T any, R any](
 		Str("method", DefaultHTTPMethod+" "+req.Spec().Procedure).
 		Str(string(OperationIDKey), ctx.Value(OperationIDKey).(string))
 
-	if req != nil {
-		l = l.Interface("request", req.Any())
-	}
-
 	l.Msg(fmt.Sprintf("%s (server stream start)", formatMethod(req.Spec().Procedure)))
 
 	err := handler(ctx, req, stream)
@@ -117,8 +104,6 @@ func LogServerStreamWithoutEvents[T any, R any](
 
 	if err != nil {
 		logEvent = logEvent.Int("error_code", int(connect.CodeOf(err)))
-	} else {
-		logEvent = logEvent.Interface("response", nil)
 	}
 
 	logEvent.Msg(fmt.Sprintf("%s (server stream end)", formatMethod(req.Spec().Procedure)))
@@ -147,14 +132,6 @@ func LogClientStreamWithoutEvents[T any, R any](
 
 	if err != nil {
 		logEvent = logEvent.Int("error_code", int(connect.CodeOf(err)))
-	}
-
-	if res != nil && err == nil {
-		logEvent = logEvent.Interface("response", res.Any())
-	}
-
-	if res == nil && err == nil {
-		logEvent = logEvent.Interface("response", nil)
 	}
 
 	logEvent.Msg(fmt.Sprintf("%s (client stream end)", formatMethod(stream.Spec().Procedure)))

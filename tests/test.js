@@ -1,13 +1,26 @@
-import { Sandbox } from 'e2b'
 import 'dotenv/config'
+import { Sandbox } from 'e2b'
 
-async function main(){
-    const templateID = process.argv[2];
+async function main() {
+  const templateID = process.argv[2] ?? 'base'
+  let sandbox
 
-    const sandbox = await Sandbox.create({ id: templateID})
-    await sandbox.filesystem.write('/hello.txt', 'Hello World')
-    const result = await sandbox.filesystem.read('/hello.txt')
-    console.log(result)
+  try {
+    sandbox = await Sandbox.create(templateID, {
+      domain: process.env.E2B_DOMAIN,
+      apiKey: process.env.E2B_API_KEY,
+      requestTimeoutMs: 180_000,
+      timeoutMs: 300_000,
+    })
+
+    await sandbox.files.write('/hello.txt', 'Hello World')
+    console.log(await sandbox.files.read('/hello.txt'))
+  } finally {
+    await sandbox?.kill()
+  }
 }
 
-main().then(() => process.exit(0))
+main().catch((error) => {
+  console.error(error)
+  process.exit(1)
+})

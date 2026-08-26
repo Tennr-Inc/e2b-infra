@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/e2b-dev/infra/packages/orchestrator/pkg/capacity"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/sandbox"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/sandbox/build"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/sandbox/fc"
@@ -34,6 +35,7 @@ import (
 	"github.com/e2b-dev/infra/packages/shared/pkg/events"
 	"github.com/e2b-dev/infra/packages/shared/pkg/fcversion"
 	"github.com/e2b-dev/infra/packages/shared/pkg/featureflags"
+	e2bgrpc "github.com/e2b-dev/infra/packages/shared/pkg/grpc"
 	"github.com/e2b-dev/infra/packages/shared/pkg/grpc/orchestrator"
 	"github.com/e2b-dev/infra/packages/shared/pkg/logger"
 	sbxlogger "github.com/e2b-dev/infra/packages/shared/pkg/logger/sandbox"
@@ -324,6 +326,9 @@ func (s *Server) Create(ctx context.Context, req *orchestrator.SandboxCreateRequ
 		)
 	}
 	if err != nil {
+		if errors.Is(err, capacity.ErrExhausted) {
+			return nil, e2bgrpc.SandboxCapacityExhausted(err.Error())
+		}
 		if errors.Is(err, storage.ErrObjectNotExist) {
 			// Snapshot data not found, let the API know the data aren't probably upload yet
 			telemetry.ReportError(ctx, "sandbox files not found", err, telemetry.WithSandboxID(req.GetSandbox().GetSandboxId()))
@@ -348,25 +353,22 @@ func (s *Server) Create(ctx context.Context, req *orchestrator.SandboxCreateRequ
 
 	s.setupSandboxLifecycle(ctx, sbx)
 
-	// Resume-time envd live-upgrade. The API /resume maps to Create
-	// with snapshot=true, so this is the real resume path. Flag-driven,
-	// best-effort + recover-wrapped (see maybeUpgradeEnvd) so it can't disrupt
-	// resume. ctx already carries the LD context (envd-version/team/template).
-	if req.GetSandbox().GetSnapshot() {
-		var upErr error
-		envdUpgraded, upErr = s.maybeUpgradeEnvd(ctx, sbx)
-		if upErr != nil {
-			// Only an unrecoverable post-execve failure (new envd left
-			// uninitialized) returns an error; fail the resume rather than hand
-			// back a bricked sandbox. MarkRunning is deferred until markSandboxLive
-			// below, so the sandbox is not yet in the live registry — MarkStopping
-			// is a no-op here and stopSandboxAsync does the physical teardown.
-			sbx.SetStopReason(sandbox.StopReasonKilled)
-			s.sandboxFactory.Sandboxes.MarkStopping(ctx, sbx.Runtime.SandboxID, sbx.LifecycleID)
-			s.stopSandboxAsync(context.WithoutCancel(ctx), sbx)
+	// Templates embed envd too, so new creates need the same version-gated
+	// upgrade as snapshot resumes. This applies a promoted credential-log fix
+	// before the first caller command, without requiring template rebuilds.
+	var upErr error
+	envdUpgraded, upErr = s.maybeUpgradeEnvd(ctx, sbx)
+	if upErr != nil {
+		// Only an unrecoverable post-execve failure (new envd left
+		// uninitialized) returns an error; fail the resume rather than hand
+		// back a bricked sandbox. MarkRunning is deferred until markSandboxLive
+		// below, so the sandbox is not yet in the live registry — MarkStopping
+		// is a no-op here and stopSandboxAsync does the physical teardown.
+		sbx.SetStopReason(sandbox.StopReasonKilled)
+		s.sandboxFactory.Sandboxes.MarkStopping(ctx, sbx.Runtime.SandboxID, sbx.LifecycleID)
+		s.stopSandboxAsync(context.WithoutCancel(ctx), sbx)
 
-			return nil, upErr
-		}
+		return nil, upErr
 	}
 
 	// Promote to the live registry only now — after any resume-time envd upgrade
@@ -1196,6 +1198,14 @@ func (s *Server) checkpointInPlace(ctx context.Context, sbx *sandbox.Sandbox, in
 // pre-in-place checkpoint flow and the fallback whenever in-place is not
 // available (async-WP sandbox or in-place-checkpoint flag off).
 func (s *Server) checkpointResumeFresh(ctx context.Context, sbx *sandbox.Sandbox, in *orchestrator.SandboxCheckpointRequest) (*orchestrator.SandboxCheckpointResponse, error) {
+	// Retain before pausing: FC exit can start asynchronous cleanup immediately.
+	// Hold the slot across teardown so another create cannot steal it.
+	capacityLease, err := sbx.RetainCapacity()
+	if err != nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "checkpoint capacity unavailable: %s", err)
+	}
+	defer capacityLease.Release()
+
 	// The old sandbox is being replaced: remove it from the live registry up
 	// front (also the natural exclusion against concurrent lifecycle RPCs —
 	// a second Checkpoint or a Kill no longer finds it) and always stop it
@@ -1230,6 +1240,14 @@ func (s *Server) checkpointResumeFresh(ctx context.Context, sbx *sandbox.Sandbox
 		return nil, status.Errorf(codes.Internal, "error snapshotting sandbox '%s': %s", in.GetSandboxId(), err)
 	}
 
+	if capacityLease != nil {
+		// The snapshot is now owned by the cache. Reclaim the old VM's actual
+		// memory before reusing its admission commitment for the replacement.
+		if err := sbx.Close(context.WithoutCancel(ctx)); err != nil {
+			return nil, status.Errorf(codes.Internal, "checkpoint teardown failed: %s", err)
+		}
+	}
+
 	// Get the template for resume
 	template, err := s.templateCache.GetTemplate(ctx, in.GetBuildId(), true, false,
 		sbxtemplate.GetTemplateOpts{MaxSandboxLengthHours: sbx.Config.MaxSandboxLengthHours})
@@ -1260,6 +1278,7 @@ func (s *Server) checkpointResumeFresh(ctx context.Context, sbx *sandbox.Sandbox
 		sbx.APIStoredConfig,
 		// Defer routing until after the upgrade's post-/init (markSandboxLive below).
 		sandbox.WithDeferredLiveRegistration(),
+		sandbox.WithCapacityLease(capacityLease),
 	)
 	if err != nil {
 		telemetry.ReportCriticalError(ctx, "error resuming sandbox after checkpoint", err, telemetry.WithSandboxID(in.GetSandboxId()))

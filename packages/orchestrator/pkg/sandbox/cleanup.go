@@ -21,6 +21,7 @@ import (
 type Cleanup struct {
 	cleanup         []func(ctx context.Context) error
 	priorityCleanup []func(ctx context.Context) error
+	onSuccess       []func()
 	error           error
 	once            sync.Once
 
@@ -30,6 +31,14 @@ type Cleanup struct {
 
 func NewCleanup() *Cleanup {
 	return &Cleanup{}
+}
+
+// OnSuccess runs after all teardown has finished without errors. Capacity must
+// remain committed when cleanup fails because a VM or mapping may still exist.
+func (c *Cleanup) OnSuccess(f func()) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onSuccess = append(c.onSuccess, f)
 }
 
 func (c *Cleanup) AddNoContext(ctx context.Context, f func() error) {
@@ -99,6 +108,11 @@ func (c *Cleanup) run(ctx context.Context) {
 	}
 
 	c.error = errors.Join(errs...)
+	if c.error == nil {
+		for _, release := range c.onSuccess {
+			release()
+		}
+	}
 }
 
 func cleanupFiles(config cfg.BuilderConfig, files *storage.SandboxFiles) func(context.Context) error {

@@ -586,6 +586,13 @@ func run() int {
 		})
 		drainWG.Wait()
 
+		// Detached pauses may outlive HTTP/gRPC drain. Keep DB and Redis open
+		// until accepted pause work has finished its terminal writes.
+		if err := apiStore.Drain(ctx); err != nil {
+			exitCode.Add(1)
+			l.Error(ctx, "sandbox work did not finish before shutdown", zap.Error(err))
+		}
+
 		// Drain pprof after, so that it is still available during the shutdown process for debugging if needed.
 		pprofShutdownCtx, pprofCancel := context.WithTimeout(ctx, pprofShutdownTimeout)
 		defer pprofCancel()
@@ -605,7 +612,8 @@ func run() int {
 
 	// TODO: wait for additional work to coalesce
 	//
-	// currently we only wait for the HTTP handlers to return, and
+	// Detached pauses are drained above. Other background work still needs
+	// lifecycle tracking: after handlers return, we
 	// then cancel the remaining context and run all of the
 	// cleanup functions. Background go routines at this point
 	// terminate. Would need to have a goroutine pool or worker

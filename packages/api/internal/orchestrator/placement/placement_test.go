@@ -15,6 +15,7 @@ import (
 
 	"github.com/e2b-dev/infra/packages/api/internal/api"
 	"github.com/e2b-dev/infra/packages/api/internal/orchestrator/nodemanager"
+	e2bgrpc "github.com/e2b-dev/infra/packages/shared/pkg/grpc"
 	"github.com/e2b-dev/infra/packages/shared/pkg/grpc/orchestrator"
 )
 
@@ -211,6 +212,26 @@ func TestPlaceSandbox_ResourceExhausted(t *testing.T) {
 
 	// Verify node1 was NOT excluded (ResourceExhausted nodes should be retried)
 	algorithm.AssertNumberOfCalls(t, "chooseNode", 2)
+}
+
+func TestPlaceSandbox_SkipsWorkerAtCommitmentLimit(t *testing.T) {
+	t.Parallel()
+	full := nodemanager.NewTestNode("full", api.NodeStatusReady, 0, 4,
+		nodemanager.WithSandboxCreateError(e2bgrpc.SandboxCapacityExhausted("RAM full")))
+	available := nodemanager.NewTestNode("available", api.NodeStatusReady, 3, 4)
+	request := &orchestrator.SandboxCreateRequest{Sandbox: &orchestrator.SandboxConfig{
+		SandboxId: "test-capacity", Vcpu: 2, RamMb: 4096,
+	}}
+	algorithm := NewBestOfK(DefaultBestOfKConfig())
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	// The full worker has the best CPU score. Without the structured refusal
+	// exclusion, every retry would select it and starve the available worker.
+	result, err := PlaceSandbox(ctx, algorithm, []*nodemanager.Node{full, available}, full, request, CPURequirement{}, false, nil)
+	require.NoError(t, err)
+	require.Equal(t, available, result.Node)
+	_, err = PlaceSandbox(ctx, algorithm, []*nodemanager.Node{full}, full, request, CPURequirement{}, false, nil)
+	require.ErrorAs(t, err, new(NoNodesAvailableError))
 }
 
 func TestPlaceSandbox_TriggersOptimisticUpdate(t *testing.T) {

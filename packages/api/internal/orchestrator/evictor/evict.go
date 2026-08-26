@@ -204,6 +204,8 @@ func (e *Evictor) evictSandbox(ctx context.Context, sbx sandbox.Sandbox) {
 	if err := e.removeSandbox(context.WithoutCancel(ctx), sbx.TeamID, sbx.SandboxID, opts); err != nil {
 		if action == sandbox.StateActionPause {
 			switch {
+			case errors.Is(err, sandbox.ErrDraining):
+				pause.LogSkipped(ctx, sbx.SandboxID, sbx.TeamID.String(), pause.ReasonTimeout, pause.SkipReasonDraining, opts.FilesystemOnly)
 			case isNotEvictableError(err):
 				pause.LogSkipped(ctx, sbx.SandboxID, sbx.TeamID.String(), pause.ReasonTimeout, pause.SkipReasonNotEvictable, opts.FilesystemOnly)
 			case errors.Is(err, sandbox.ErrNotFound):

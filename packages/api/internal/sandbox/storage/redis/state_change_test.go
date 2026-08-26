@@ -458,7 +458,7 @@ func TestStartRemoving_TransitionKeyTTL(t *testing.T) {
 	// Check TTL is set
 	ttl, err := client.TTL(ctx, transitionKey).Result()
 	require.NoError(t, err)
-	assert.Greater(t, ttl, time.Duration(0))
+	assert.Greater(t, ttl, 90*time.Second, "transition ownership must outlast pause and terminal write budgets")
 	assert.LessOrEqual(t, ttl, transitionKeyTTL)
 }
 

@@ -18,13 +18,15 @@ func newTeamLimits(
 	teamLimits *authqueries.TeamLimit,
 ) *TeamLimits {
 	return &TeamLimits{
-		SandboxConcurrency: teamLimits.ConcurrentSandboxes,
-		BuildConcurrency:   teamLimits.ConcurrentTemplateBuilds,
-		MaxLengthHours:     teamLimits.MaxLengthHours,
-		MaxVcpu:            teamLimits.MaxVcpu,
-		MaxRamMb:           teamLimits.MaxRamMb,
-		DiskMb:             teamLimits.DiskMb,
-		EventsTTLDays:      teamLimits.EventsTtlDays,
+		SandboxConcurrency:    teamLimits.ConcurrentSandboxes,
+		BuildConcurrency:      teamLimits.ConcurrentTemplateBuilds,
+		MaxLengthHours:        teamLimits.MaxLengthHours,
+		MaxVcpu:               teamLimits.MaxVcpu,
+		MaxRamMb:              teamLimits.MaxRamMb,
+		DiskMb:                teamLimits.DiskMb,
+		DefaultFreeDiskSizeMb: teamLimits.DefaultFreeDiskSizeMb,
+		MaxDiskSizeMb:         teamLimits.MaxDiskSizeMb,
+		EventsTTLDays:         teamLimits.EventsTtlDays,
 	}
 }
 

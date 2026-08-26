@@ -72,6 +72,7 @@ type fakePauseBackend struct {
 	sbx       sandbox.Sandbox
 	lookupErr error
 
+	removeErr    error
 	removeCalled bool
 	removeOpts   sandbox.RemoveOpts
 }
@@ -84,7 +85,7 @@ func (f *fakePauseBackend) RemoveSandbox(_ context.Context, _ uuid.UUID, _ strin
 	f.removeCalled = true
 	f.removeOpts = opts
 
-	return nil
+	return f.removeErr
 }
 
 func pauseRequest(t *testing.T, teamID uuid.UUID, body string) (*httptest.ResponseRecorder, *gin.Context) {
@@ -158,4 +159,14 @@ func TestPostSandboxesSandboxIDPause_FsOnlyGateWiring(t *testing.T) {
 		require.True(t, backend.removeCalled)
 		assert.False(t, backend.removeOpts.FilesystemOnly)
 	})
+}
+
+func TestPostSandboxesSandboxIDPause_DrainingReturnsRetryableError(t *testing.T) {
+	t.Parallel()
+	backend := &fakePauseBackend{removeErr: sandbox.ErrDraining}
+	store := &APIStore{pauseBackendOverride: backend}
+	recorder, ginCtx := pauseRequest(t, uuid.New(), "")
+	store.PostSandboxesSandboxIDPause(ginCtx, "sbxwiringtest0000000")
+	assert.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "shutting down, please retry")
 }

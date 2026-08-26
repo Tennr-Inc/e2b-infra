@@ -19,9 +19,21 @@ import (
 	sbxlogger "github.com/e2b-dev/infra/packages/shared/pkg/logger/sandbox"
 )
 
+const pauseTimeout = 80 * time.Second
+
 func (o *Orchestrator) RemoveSandbox(ctx context.Context, teamID uuid.UUID, sandboxID string, opts sandbox.RemoveOpts) error {
 	ctx, span := tracer.Start(ctx, "remove-sandbox")
 	defer span.End()
+
+	// A pause outlives its caller. Register before admission so shutdown
+	// cannot finish draining and then accept an untracked pause.
+	if opts.Action == sandbox.StateActionPause {
+		releaseWork, ok := o.TrackWork()
+		if !ok {
+			return ErrDraining
+		}
+		defer releaseWork()
+	}
 
 	sbx, alreadyDone, finish, err := o.sandboxStore.StartRemoving(ctx, teamID, sandboxID, opts)
 	if err != nil {
@@ -98,6 +110,14 @@ func (o *Orchestrator) RemoveSandbox(ctx context.Context, teamID uuid.UUID, sand
 		}
 
 		return nil
+	}
+
+	if opts.Action == sandbox.StateActionPause {
+		// After acquiring the transition, preserve the snapshot even if the
+		// client disconnects. Upsert and the node RPC share a bounded budget.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), pauseTimeout)
+		defer cancel()
 	}
 
 	defer func() { go o.analyticsRemove(context.WithoutCancel(ctx), sbx, opts.Action) }()

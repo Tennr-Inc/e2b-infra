@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/e2b-dev/infra/packages/clickhouse/pkg/hoststats"
+	"github.com/e2b-dev/infra/packages/orchestrator/pkg/capacity"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/cfg"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/sandbox/block"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/sandbox/build"
@@ -330,9 +331,10 @@ type Sandbox struct {
 	// Fresh host timestamp marking lifecycle start.
 	LifecycleStartedAt time.Time
 
-	config  cfg.BuilderConfig
-	files   *storage.SandboxFiles
-	cleanup *Cleanup
+	config        cfg.BuilderConfig
+	files         *storage.SandboxFiles
+	cleanup       *Cleanup
+	capacityLease *capacity.Lease
 
 	sandboxes *Map
 
@@ -539,6 +541,7 @@ func (m *Metadata) ExecutionDuration() (time.Duration, bool) {
 
 type Factory struct {
 	Sandboxes         *Map
+	capacity          *capacity.Tracker
 	config            cfg.BuilderConfig
 	networkPool       network.PoolInterface
 	devicePool        *nbd.DevicePool
@@ -559,12 +562,13 @@ func NewFactory(
 	egressProxy network.EgressProxy,
 	networkAssignHook NetworkAssignHook,
 	sandboxes *Map,
+	opts ...FactoryOption,
 ) *Factory {
 	if networkAssignHook == nil {
 		networkAssignHook = NoopNetworkAssignHook{}
 	}
 
-	return &Factory{
+	factory := &Factory{
 		Sandboxes:         sandboxes,
 		config:            config,
 		networkPool:       networkPool,
@@ -575,6 +579,17 @@ func NewFactory(
 		egressProxy:       egressProxy,
 		networkAssignHook: networkAssignHook,
 	}
+	for _, opt := range opts {
+		opt(factory)
+	}
+
+	return factory
+}
+
+type FactoryOption func(*Factory)
+
+func WithCapacity(tracker *capacity.Tracker) FactoryOption {
+	return func(f *Factory) { f.capacity = tracker }
 }
 
 // runNetworkAssignHook calls the configured NetworkAssignHook.OnNetworkAssign
@@ -660,11 +675,17 @@ func (f *Factory) CreateSandbox(
 		opt(&createOpts)
 	}
 
+	capacityLease, err := f.capacity.Acquire(config.RamMB)
+	if err != nil {
+		return nil, err
+	}
+
 	execCtx, execSpan := startExecutionSpan(ctx)
 
 	exit := utils.NewErrorOnce()
 
 	cleanup := NewCleanup()
+	cleanup.OnSuccess(capacityLease.Release)
 	defer func() {
 		if e != nil {
 			cleanupErr := cleanup.Run(ctx)
@@ -793,6 +814,7 @@ func (f *Factory) CreateSandbox(
 	}
 
 	sbx := &Sandbox{
+		capacityLease:      capacityLease,
 		LifecycleID:        lifecycleID,
 		LifecycleStartedAt: time.Now().UTC(),
 
@@ -905,6 +927,7 @@ func handleSpanError(span trace.Span, err *error) {
 
 // resumeOptions carries the optional knobs of ResumeSandbox.
 type resumeOptions struct {
+	capacityLease *capacity.Lease
 	// denyEgress isolates the resumed sandbox from the network (except the
 	// orchestrator control path) before it is resumed.
 	denyEgress bool
@@ -924,6 +947,16 @@ type resumeOptions struct {
 
 // ResumeOption customizes a ResumeSandbox call.
 type ResumeOption func(*resumeOptions)
+
+// WithCapacityLease reuses a checkpoint commitment. The old VM must be fully
+// closed before calling ResumeSandbox, so the guests never share the RAM budget.
+func WithCapacityLease(lease *capacity.Lease) ResumeOption {
+	return func(o *resumeOptions) { o.capacityLease = lease }
+}
+
+func (s *Sandbox) RetainCapacity() (*capacity.Lease, error) {
+	return s.capacityLease.Retain()
+}
 
 // WithDenyEgress denies all network egress for the resumed sandbox — except the
 // orchestrator control path — before Firecracker is resumed, so neither envd
@@ -986,11 +1019,26 @@ func (f *Factory) ResumeSandbox(
 		opt(&ropts)
 	}
 
+	var capacityLease *capacity.Lease
+	var err error
+	if ropts.capacityLease != nil {
+		if ropts.capacityLease.MemoryMiB() != config.RamMB {
+			return nil, errors.New("replacement guest RAM differs from capacity lease")
+		}
+		capacityLease, err = ropts.capacityLease.Retain()
+	} else {
+		capacityLease, err = f.capacity.Acquire(config.RamMB)
+	}
+	if err != nil {
+		return nil, err
+	}
+
 	execCtx, execSpan := startExecutionSpan(ctx)
 
 	exit := utils.NewErrorOnce()
 
 	cleanup := NewCleanup()
+	cleanup.OnSuccess(capacityLease.Release)
 	defer func() {
 		if e != nil {
 			cleanupErr := cleanup.Run(ctx)
@@ -1298,6 +1346,7 @@ func (f *Factory) ResumeSandbox(
 	}
 
 	sbx := &Sandbox{
+		capacityLease:      capacityLease,
 		LifecycleID:        lifecycleID,
 		LifecycleStartedAt: time.Now().UTC(),
 

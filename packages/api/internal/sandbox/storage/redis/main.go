@@ -16,9 +16,12 @@ import (
 	"github.com/e2b-dev/infra/packages/shared/pkg/telemetry"
 )
 
+// TransitionKeyTTL outlives the 80-second pause and 10-second terminal DB write.
+const TransitionKeyTTL = 95 * time.Second
+
 const (
 	lockTimeout            = time.Minute
-	transitionKeyTTL       = 70 * time.Second // Should be longer than the longest expected state transition time
+	transitionKeyTTL       = TransitionKeyTTL
 	transitionResultKeyTTL = 30 * time.Second
 	lockRetryMinInterval   = 200 * time.Millisecond
 	lockRetryMaxInterval   = time.Second

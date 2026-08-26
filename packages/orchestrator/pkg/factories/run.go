@@ -33,6 +33,7 @@ import (
 	clickhouse "github.com/e2b-dev/infra/packages/clickhouse/pkg"
 	clickhouseevents "github.com/e2b-dev/infra/packages/clickhouse/pkg/events"
 	clickhousehoststats "github.com/e2b-dev/infra/packages/clickhouse/pkg/hoststats"
+	"github.com/e2b-dev/infra/packages/orchestrator/pkg/capacity"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/cfg"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/chrooted"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/events"
@@ -843,7 +844,14 @@ func run(config cfg.Config, opts Options) (success bool) {
 	if networkAssignHook == nil {
 		networkAssignHook = sandbox.NoopNetworkAssignHook{}
 	}
-	sandboxFactory := sandbox.NewFactory(config.BuilderConfig, networkPool, devicePool, featureFlags, hostStatsDelivery, cgroupManager, egressSetup.Proxy, networkAssignHook, sandboxes)
+	capacityTracker, err := capacity.Load(capacity.DefaultConfigPath)
+	if err != nil {
+		logger.L().Fatal(ctx, "invalid sandbox capacity policy", zap.Error(err))
+	}
+	if capacityTracker != nil && !reclaimClean {
+		logger.L().Fatal(ctx, "capacity admission requires successful startup reclaim")
+	}
+	sandboxFactory := sandbox.NewFactory(config.BuilderConfig, networkPool, devicePool, featureFlags, hostStatsDelivery, cgroupManager, egressSetup.Proxy, networkAssignHook, sandboxes, sandbox.WithCapacity(capacityTracker))
 
 	// isolated filesystems cache (for nfs proxy)
 	builder := chrooted.NewBuilder(config)
@@ -1015,6 +1023,9 @@ func run(config cfg.Config, opts Options) (success bool) {
 
 	httpMux := http.NewServeMux()
 	httpMux.Handle("/health", healthcheck.CreateHandler())
+	httpMux.Handle("/capacity", capacityTracker.Handler(func() bool {
+		return serviceInfo.GetStatus().Status == orchestratorinfo.ServiceInfoStatus_Healthy
+	}))
 
 	if localUploadHandler != nil {
 		httpMux.Handle("/upload", localUploadHandler)
