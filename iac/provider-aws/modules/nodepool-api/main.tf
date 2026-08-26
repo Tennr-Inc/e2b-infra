@@ -88,6 +88,8 @@ resource "aws_launch_template" "api" {
       volume_size           = 20
       volume_type           = "gp3"
       delete_on_termination = true
+      encrypted             = true
+      kms_key_id            = var.ebs_kms_key_arn
     }
   }
 

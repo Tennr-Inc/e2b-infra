@@ -16,6 +16,8 @@ source "amazon-ebs" "ubuntu" {
   instance_type = var.base_instance_type
   ami_name      = "${var.prefix}orch-${formatdate("YYYY-MM-DD-hh-mm-ss", timestamp())}"
   ssh_username  = "ubuntu"
+  encrypt_boot  = true
+  kms_key_id    = var.ebs_kms_key_arn
 
   vpc_id                      = var.vpc_id
   subnet_id                   = var.subnet_id

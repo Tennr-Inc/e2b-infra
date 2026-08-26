@@ -61,6 +61,8 @@ resource "aws_ebs_volume" "clickhouse" {
   availability_zone = var.clickhouse_az
   size              = var.data_volume_size_gb
   type              = "gp3"
+  encrypted         = true
+  kms_key_id        = var.ebs_kms_key_arn
 
   tags = {
     Name = "${var.prefix}clickhouse-data-${each.key}"
@@ -89,6 +91,8 @@ resource "aws_launch_template" "clickhouse" {
       volume_size           = 20
       volume_type           = "gp3"
       delete_on_termination = true
+      encrypted             = true
+      kms_key_id            = var.ebs_kms_key_arn
     }
   }
 
@@ -119,7 +123,7 @@ resource "aws_instance" "clickhouse" {
     http_tokens = "required"
   }
 
-  user_data = base64encode(templatefile("${local.scripts_path}/start-clickhouse.sh", {
+  user_data_base64 = base64encode(templatefile("${local.scripts_path}/start-clickhouse.sh", {
     NODE_POOL                    = var.node_pool_name
     CLUSTER_TAG_NAME             = var.cluster_tag_name
     CLUSTER_TAG_VALUE            = var.cluster_tag_value
@@ -138,6 +142,8 @@ resource "aws_instance" "clickhouse" {
     // Volume ID is used in nvme device metadata but without "-" so we need to strip it here as well.
     EBS_VOLUME_ID = replace(aws_ebs_volume.clickhouse[each.key].id, "-", "")
   }))
+
+  user_data_replace_on_change = true
 
   tags = {
     Name = "${var.prefix}orch-clickhouse-${each.key}"

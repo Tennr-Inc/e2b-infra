@@ -59,6 +59,10 @@ variable "machine_type" {
   default = "m8i.4xlarge"
 }
 
+variable "ebs_kms_key_arn" {
+  type = string
+}
+
 variable "node_pool_name" {
   type        = string
   description = "Nomad node pool name for client nodes"

@@ -60,16 +60,6 @@ resource "aws_s3_bucket_lifecycle_configuration" "loki_storage" {
   }
 }
 
-resource "aws_s3_bucket_server_side_encryption_configuration" "loki_storage" {
-  bucket = aws_s3_bucket.loki_storage.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
 # ---
 # Load Balancer Logs
 # ---
@@ -153,5 +143,38 @@ resource "aws_s3_bucket_lifecycle_configuration" "clickhouse_backups" {
     }
 
     status = "Enabled"
+  }
+}
+
+# ---
+# Customer-managed encryption
+# ---
+
+locals {
+  kms_encrypted_bucket_ids = {
+    clickhouse_backups      = aws_s3_bucket.clickhouse_backups.id
+    fc_busybox              = aws_s3_bucket.fc_busybox.id
+    fc_env_pipeline         = aws_s3_bucket.fc_env_pipeline.id
+    fc_kernels              = aws_s3_bucket.fc_kernels.id
+    fc_template_build_cache = aws_s3_bucket.fc_template_build_cache.id
+    fc_templates            = aws_s3_bucket.fc_templates.id
+    fc_versions             = aws_s3_bucket.fc_versions.id
+    loki_storage            = aws_s3_bucket.loki_storage.id
+    setup                   = aws_s3_bucket.setup.id
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "kms" {
+  for_each = local.kms_encrypted_bucket_ids
+
+  bucket = each.value
+
+  rule {
+    bucket_key_enabled = true
+
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = aws_kms_key.s3.arn
+      sse_algorithm     = "aws:kms"
+    }
   }
 }

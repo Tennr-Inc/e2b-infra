@@ -7,7 +7,7 @@
 - [Packer](https://developer.hashicorp.com/packer/tutorials/docker-get-started/get-started-install-cli#installing-packer)
   - Used for building the disk image of the orchestrator client and server
 
-- [Terraform](https://developer.hashicorp.com/terraform/tutorials/aws-get-started/install-cli) (v1.7.5)
+- [OpenTofu](https://opentofu.org/docs/intro/install/) (recommended for this fork) or Terraform
     - Binaries are available [here](https://developer.hashicorp.com/terraform/install/versions#binary-downloads)
   - You can also install it via [tfenv](https://github.com/tfutils/tfenv)
     ```sh
@@ -28,9 +28,8 @@
 
 **Accounts**
 
-- Cloudflare account
-- Domain on Cloudflare
-- PostgreSQL database
+- Cloudflare account and domain (GCP only)
+- PostgreSQL database (GCP; the AWS configuration below provisions private RDS)
 
 **Optional**
 
@@ -101,6 +100,10 @@ Now, you should see the right quota options in `All Quotas` and be able to reque
 
 ## AWS
 
+For Tennr's dedicated account, internal-only ingress, cross-account PrivateLink, customer-managed
+encryption, team bootstrap, and key rotation workflow, follow the
+[shared private AWS runbook](docs/aws-private-shared.md).
+
 ### Additional Prerequisites
 
 - [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
@@ -110,47 +113,70 @@ Now, you should see the right quota options in `All Quotas` and be able to reque
     aws configure --profile <your-profile>
     ```
 - AWS account
+- An ACM certificate covering `*.${DOMAIN_NAME}`, or access to publish one DNS validation CNAME
+- One or more AWS consumer accounts permitted to create PrivateLink interface endpoints
 
 ### Steps
 
-1. Create `.env.prod`, `.env.staging`, or `.env.dev` from [`.env.aws.template`](.env.aws.template). Make sure to fill in the AWS-specific values:
+1. Create `.env.shared` from [`.env.aws.template`](.env.aws.template). Make sure to fill in the AWS-specific values:
     - `PROVIDER=aws`
     - `AWS_PROFILE` - your AWS CLI profile name
     - `AWS_ACCOUNT_ID` - your AWS account ID
     - `AWS_REGION` - the AWS region to deploy to (must support nested virtualization for Firecracker)
     - `PREFIX` - name prefix for all resources (e.g. `e2b-`)
-    - `DOMAIN_NAME` - your domain managed by Cloudflare
-    - `TERRAFORM_ENVIRONMENT` - one of `prod`, `staging`, `dev`
-2. Run `make set-env ENV={prod,staging,dev}` to start using your env
-3. Run `make provider-login` to authenticate with AWS ECR
-4. Run `make init`. This creates:
-    - S3 bucket for Terraform state
-    - VPC, subnets, and networking
+    - `DOMAIN_NAME` - stable private DNS suffix, for example `e2b.internal.example.com`
+    - `PRIVATELINK_ALLOWED_PRINCIPAL_ARNS` - JSON list of consumer-account root or IAM role ARNs
+    - `INGRESS_CERTIFICATE_ARN` - optional existing ACM certificate covering `*.${DOMAIN_NAME}`;
+      leave empty to request one with `make request-certificate`
+    - `INGRESS_CERTIFICATE_VALIDATION_ZONE_ID` - optional public Route53 zone where OpenTofu should
+      create the ACM ownership-validation CNAME
+    - `POSTGRES_ADMIN_INGRESS_SECURITY_GROUP_IDS` - optional JSON list of private connector security
+      groups allowed to administer RDS on port 5432 during bootstrap
+    - `VPC_CIDR`, `VPC_AVAILABILITY_ZONES`, `VPC_PUBLIC_SUBNETS`, `VPC_PRIVATE_SUBNETS`, and `VPC_ELASTICACHE_SUBNETS` - the dedicated, non-overlapping E2B network layout
+    - `KMS_KEY_DELETION_WINDOW_DAYS` - deletion waiting period for the EBS, RDS, and S3 CMKs
+    - `TERRAFORM_ENVIRONMENT=shared`
+2. Run `make set-env ENV=shared` to start using your env
+3. Run `make aws-private-preflight` to verify the account, local tools, PrivateLink principals, and certificate
+4. Run `make provider-login` to authenticate with AWS ECR
+5. Run `make init`. This creates:
+    - S3 bucket for OpenTofu state
+    - Dedicated VPC, private workload subnets, NAT subnets, and AWS endpoints
     - ECR repositories for container images
     - S3 buckets for templates, kernels, builds, and backups
-    - Secrets in AWS Secrets Manager (with placeholder values)
-    - Cloudflare DNS records and TLS certificates
-5. Update the following secrets in [AWS Secrets Manager](https://console.aws.amazon.com/secretsmanager) with actual values:
-    - `{prefix}cloudflare` - JSON with `TOKEN` key
-        > Get Cloudflare API Token: go to the [Cloudflare dashboard](https://dash.cloudflare.com/) -> Manage Account -> Account API Tokens -> Create Token -> Edit Zone DNS -> in "Zone Resources" select your domain and generate the token
-    - `{prefix}postgres-connection-string` - your PostgreSQL connection string (**required**)
+    - Rotating customer-managed KMS keys for EBS, RDS, and S3
+    - Secrets in AWS Secrets Manager (with placeholder values for optional integrations)
+6. If `INGRESS_CERTIFICATE_ARN` is empty, run `make request-certificate`. When
+   `INGRESS_CERTIFICATE_VALIDATION_ZONE_ID` identifies an authoritative public Route53 zone,
+   OpenTofu creates the CNAME and waits for ACM. Otherwise publish the printed CNAME in the
+   external authoritative DNS provider. This record validates ownership only; E2B service DNS
+   remains private.
+7. Update the following secrets in [AWS Secrets Manager](https://console.aws.amazon.com/secretsmanager) with actual values:
     - `{prefix}grafana` - JSON with `API_KEY`, `OTLP_URL`, `OTEL_COLLECTOR_TOKEN`, `USERNAME` keys (optional, for monitoring)
     - `{prefix}launch-darkly-api-key` - LaunchDarkly SDK key (optional, for feature flags)
-6. Build the Packer AMI for cluster nodes (a single shared AMI used by all node types):
+8. Build the Packer AMI for cluster nodes (a single shared AMI used by all node types):
     ```sh
     cd iac/provider-aws/nomad-cluster-disk-image
     make init   # install Packer plugins
     make build  # build the AMI (~5 min, launches a t3.large)
     ```
-7. Run `make build-and-upload` to build and push container images and binaries
-8. Run `make copy-public-builds` to copy kernels, Firecracker versions, and busybox to your S3 buckets
-9. Run `make plan-without-jobs` and then `make apply` to provision the cluster infrastructure
-10. Run `make plan` and then `make apply` to deploy all Nomad jobs (this also runs database migrations automatically via the API's db-migrator task)
-11. Setup data in the cluster by running `make prep-cluster` to create an initial user, team, and build a base template
+9. Run `make build-and-upload` to build and push container images and binaries
+10. Run `make copy-public-builds` to copy kernels, Firecracker versions, and busybox to your S3 buckets
+11. Run `make plan-without-jobs` and then `make apply` to provision the cluster infrastructure,
+   private RDS PostgreSQL, managed Valkey, the internal ALB/NLB, and the endpoint service. OpenTofu
+   writes the generated PostgreSQL connection string to `{prefix}postgres-connection-string`.
+12. Create interface endpoints and private wildcard DNS in the staging and production accounts.
+13. Run `make plan` and then `make apply` to deploy all Nomad jobs. The API's db-migrator task runs
+   database migrations and creates the compatibility role required by historical migrations.
+14. Run `make seed-db` for distinct staging and production teams, then build the base template for each.
 
 ### AWS Architecture
 
 The AWS deployment provisions the following:
+
+All ingress is private. An internal Network Load Balancer publishes a VPC endpoint service and
+forwards TLS to the internal Application Load Balancer. Only explicitly allowed AWS principals can
+create consumer endpoints. The ALB has no public IPs or HTTP listener, and wildcard records exist
+only in Route53 private hosted zones. The AWS provider refuses to run outside `AWS_ACCOUNT_ID`.
 
 **Node Pools (EC2 Auto Scaling Groups):**
 - **Control Server** - Nomad/Consul servers (default: 3x `t3.medium`)
@@ -159,8 +185,19 @@ The AWS deployment provisions the following:
 - **Build** - Template manager for building sandbox templates (default: `m8i.2xlarge`)
 - **ClickHouse** - Analytics database (default: `t3.xlarge`)
 
-**Managed Services (optional):**
-- ElastiCache Redis (set `REDIS_MANAGED=true`)
+**Managed data services:**
+- RDS PostgreSQL in isolated data subnets, encrypted with its own CMK, TLS required by clients, with seven
+  days of backups and deletion protection by default
+- ElastiCache Valkey (set `REDIS_MANAGED=true`), encrypted at rest and in transit with Multi-AZ
+  automatic failover and seven days of snapshots
+
+Both security groups accept connections only from the E2B cluster-node security group. Neither
+service is publicly accessible. The generated PostgreSQL password and connection string are
+OpenTofu-sensitive values; the connection string is also stored in AWS Secrets Manager.
+
+Sandbox RFC1918 access remains blocked unless `ALLOW_SANDBOX_INTERNAL_CIDRS` is explicitly set.
+Do not set it to a Tennr or E2B VPC CIDR. Use only narrow gateway endpoint CIDRs because the exception
+applies to every sandbox on the orchestrator fleet.
 
 ### AWS Troubleshooting
 
@@ -231,6 +268,9 @@ You can build your own kernel and Firecracker version from source by running `ma
 - `make copy-public-builds` - copies busybox, kernels, and firecracker versions from the public bucket to your bucket
 - `make migrate` - runs the migrations for your database
 - `make provider-login` - logs in to cloud provider
+- `make aws-private-preflight` - validates AWS account, peer network, private ingress, tools, instance offerings, and certificate
+- `make request-certificate` - requests an ACM certificate and prints the external DNS validation record
+- `make certificate-validation-records` - prints the managed ACM certificate validation record again
 - `make switch-env ENV={prod,staging,dev}` - switches the environment
 - `make import TARGET={resource} ID={resource_id}` - imports the already created resources into the terraform state
 - `make setup-ssh` - sets up the ssh key for the environment (useful for remote-debugging)

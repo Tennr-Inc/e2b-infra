@@ -5,11 +5,6 @@ terraform {
       version = "~> 6.35.1"
     }
 
-    cloudflare = {
-      source  = "cloudflare/cloudflare"
-      version = "4.48.0"
-    }
-
     nomad = {
       source  = "hashicorp/nomad"
       version = "2.1.0"
@@ -24,15 +19,23 @@ terraform {
   required_version = ">= 1.0"
 
   backend "s3" {
-    key = "terraform/orchestration/state"
+    key     = "terraform/orchestration/state"
+    encrypt = true
   }
 }
 
-provider "cloudflare" {
-  api_token = module.init.cloudflare.token
-}
+provider "aws" {
+  region              = var.aws_region
+  allowed_account_ids = [var.aws_account_id]
 
-provider "aws" {}
+  default_tags {
+    tags = {
+      Environment = var.environment
+      ManagedBy   = "terraform"
+      Service     = "e2b"
+    }
+  }
+}
 
 provider "nomad" {
   address      = "https://nomad.${var.domain_name}"
@@ -53,11 +56,20 @@ module "init" {
   bucket_prefix = var.bucket_prefix
 
   region = data.aws_region.current.id
-  endpoint_ingress_subnet_ids = [
+  endpoint_ingress_security_group_ids = [
     aws_security_group.cluster_node.id
   ]
 
+  vpc_availability_zones  = var.vpc_availability_zones
+  vpc_cidr                = var.vpc_cidr
+  vpc_public_subnets      = var.vpc_public_subnets
+  vpc_private_subnets     = var.vpc_private_subnets
+  vpc_elasticache_subnets = var.vpc_elasticache_subnets
+  use_instance_connect    = var.use_instance_connect
+
   allow_force_destroy = var.allow_force_destroy
+
+  kms_key_deletion_window_days = var.kms_key_deletion_window_days
 
   docker_reverse_proxy_enabled = var.docker_reverse_proxy_enabled
 }
@@ -81,6 +93,7 @@ locals {
   loki_port             = 3100
   logs_proxy_port       = 30006
   otel_collector_port   = 4317
+  postgres_port         = 5432
 
   auth_provider_config = {
     jwt = []
@@ -95,7 +108,10 @@ locals {
   # AMI name prefix must match what Packer produces: "${var.prefix}orch-<timestamp>"
   ami_family_prefix = "${var.prefix}orch-"
 
-  redis_cluster_url   = var.redis_managed ? "rediss://${module.redis[0].endpoint_address}:${local.redis_port}" : ""
+  # E2B's Redis clients pass this value directly to net.Dial. TLS is enabled
+  # separately through REDIS_TLS_ENABLED and REDIS_TLS_CA_BASE64, so this must
+  # remain a bare host:port address rather than a redis:// or rediss:// URI.
+  redis_cluster_url   = var.redis_managed ? "${module.redis[0].endpoint_address}:${local.redis_port}" : ""
   redis_tls_ca_base64 = var.redis_managed ? module.redis[0].endpoint_ca_pem_base64 : ""
   # CA implies TLS: the factory refuses a CA without the flag.
   redis_tls_enabled = var.redis_managed ? "true" : "false"
@@ -117,10 +133,10 @@ locals {
     SANDBOX_ACCESS_TOKEN_HASH_SEED = module.init.sandbox_access_token_hash_seed
     AUTH_PROVIDER_CONFIG           = replace(jsonencode(local.auth_provider_config), "\"", "\\\"")
 
-    POSTGRES_CONNECTION_STRING   = module.init.postgres_connection_string
+    POSTGRES_CONNECTION_STRING   = module.postgres.connection_string
     DB_MAX_OPEN_CONNECTIONS      = tostring(var.db_max_open_connections)
     DB_MIN_IDLE_CONNECTIONS      = tostring(var.db_min_idle_connections)
-    AUTH_DB_CONNECTION_STRING    = module.init.postgres_connection_string
+    AUTH_DB_CONNECTION_STRING    = module.postgres.connection_string
     AUTH_DB_MAX_OPEN_CONNECTIONS = tostring(var.auth_db_max_open_connections)
     AUTH_DB_MIN_IDLE_CONNECTIONS = tostring(var.auth_db_min_idle_connections)
 
@@ -148,7 +164,7 @@ locals {
   }, var.api_env_vars)
 
   api_db_migrator_env_vars = merge({
-    POSTGRES_CONNECTION_STRING = module.init.postgres_connection_string
+    POSTGRES_CONNECTION_STRING = module.postgres.connection_string
   }, var.api_db_migrator_env_vars)
 
   client_proxy_env_vars = merge({
@@ -231,12 +247,39 @@ module "redis" {
   ]
 }
 
+module "postgres" {
+  source = "./modules/postgres"
+
+  prefix                      = var.prefix
+  vpc_id                      = module.init.vpc_id
+  subnet_ids                  = module.init.vpc_data_subnet_ids
+  connection_string_secret_id = module.init.postgres_connection_string_secret_id
+  kms_key_arn                 = module.init.rds_kms_key_arn
+
+  port                    = local.postgres_port
+  engine_version          = var.postgres_engine_version
+  instance_class          = var.postgres_instance_class
+  allocated_storage       = var.postgres_allocated_storage
+  max_allocated_storage   = var.postgres_max_allocated_storage
+  multi_az                = var.postgres_multi_az
+  backup_retention_period = var.postgres_backup_retention_period
+  deletion_protection     = var.postgres_deletion_protection
+  skip_final_snapshot     = var.postgres_skip_final_snapshot
+
+  ingress_security_group_ids = concat(
+    [aws_security_group.cluster_node.id],
+    var.postgres_admin_ingress_security_group_ids,
+  )
+}
+
 module "cluster" {
   source = "./nomad-cluster"
 
-  prefix         = var.prefix
-  aws_account_id = data.aws_caller_identity.current.account_id
-  aws_region     = data.aws_region.current.id
+  prefix          = var.prefix
+  aws_account_id  = data.aws_caller_identity.current.account_id
+  aws_region      = data.aws_region.current.id
+  ebs_kms_key_arn = module.init.ebs_kms_key_arn
+  s3_kms_key_arn  = module.init.s3_kms_key_arn
 
   nomad_acl_token_secret          = module.init.cluster.nomad_acl_token
   consul_acl_token_secret         = module.init.cluster.consul_acl_token

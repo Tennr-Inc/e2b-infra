@@ -35,3 +35,8 @@ variable "subnet_group_name" {
 variable "ingress_security_group_ids" {
   type = list(string)
 }
+
+variable "snapshot_retention_limit" {
+  type    = number
+  default = 7
+}

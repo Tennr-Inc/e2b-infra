@@ -73,6 +73,18 @@ data "aws_ecr_repository" "custom_environments" {
 }
 
 data "aws_iam_policy_document" "cluster_node_policy" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "kms:Decrypt",
+      "kms:DescribeKey",
+      "kms:Encrypt",
+      "kms:GenerateDataKey*",
+      "kms:ReEncrypt*",
+    ]
+    resources = [var.s3_kms_key_arn]
+  }
+
   // Allow read access to S3 bucket with Consul and Nomad setup scripts
   statement {
     effect = "Allow"
@@ -217,6 +229,7 @@ module "control_server" {
   image_family_prefix = var.control_server_image_family_prefix
   cluster_size        = var.control_server_cluster_size
   machine_type        = var.control_server_machine_type
+  ebs_kms_key_arn     = var.ebs_kms_key_arn
 
   nomad_acl_token              = var.nomad_acl_token_secret
   consul_acl_token             = var.consul_acl_token_secret
@@ -246,6 +259,7 @@ module "api" {
   image_family_prefix = var.api_image_family_prefix
   cluster_size        = var.api_cluster_size
   machine_type        = var.api_machine_type
+  ebs_kms_key_arn     = var.ebs_kms_key_arn
 
   node_pool_name               = var.api_node_pool_name
   consul_acl_token             = var.consul_acl_token_secret
@@ -277,6 +291,7 @@ module "clickhouse" {
   image_family_prefix = var.clickhouse_image_family_prefix
   cluster_size        = var.clickhouse_cluster_size
   machine_type        = var.clickhouse_machine_type
+  ebs_kms_key_arn     = var.ebs_kms_key_arn
 
   node_pool_name                    = var.clickhouse_node_pool_name
   clickhouse_az                     = var.clickhouse_az
@@ -312,6 +327,7 @@ module "build" {
   image_family_prefix = var.build_image_family_prefix
   cluster_size        = var.build_cluster_size
   machine_type        = var.build_machine_type
+  ebs_kms_key_arn     = var.ebs_kms_key_arn
 
   node_pool_name                    = var.build_node_pool_name
   node_labels                       = var.build_node_labels
@@ -357,6 +373,7 @@ module "client" {
   image_family_prefix = var.client_image_family_prefix
   cluster_size        = var.client_cluster_size
   machine_type        = var.client_machine_type
+  ebs_kms_key_arn     = var.ebs_kms_key_arn
 
   node_pool_name                    = var.client_node_pool_name
   node_labels                       = var.client_node_labels

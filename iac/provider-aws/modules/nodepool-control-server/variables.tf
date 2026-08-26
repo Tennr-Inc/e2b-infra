@@ -60,6 +60,10 @@ variable "machine_type" {
   default = "t3.medium"
 }
 
+variable "ebs_kms_key_arn" {
+  type = string
+}
+
 variable "nomad_acl_token" {
   type = string
 }
