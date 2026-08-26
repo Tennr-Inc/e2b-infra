@@ -46,6 +46,13 @@ resource "aws_security_group" "ingress" {
   tags = {
     Name = "${var.prefix}ingress-load-balancer"
   }
+
+  lifecycle {
+    precondition {
+      condition     = length(var.ingress_allowed_cidr_blocks) > 0 || length(var.ingress_allowed_security_group_ids) > 0
+      error_message = "Configure at least one private CIDR or security group for HTTPS ingress."
+    }
+  }
 }
 
 resource "aws_lb" "ingress" {

@@ -7,6 +7,10 @@ PROVIDER ?= gcp
 AWS_BUCKET_PREFIX ?= $(PREFIX)$(AWS_ACCOUNT_ID)-
 GCP_BUCKET_PREFIX ?= $(GCP_PROJECT_ID)-
 
+ifeq ($(PROVIDER),aws)
+POSTGRES_ENV_COMMAND := AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" POSTGRES_CONNECTION_STRING_SECRET_NAME="$(PREFIX)postgres-connection-string" ./scripts/with-aws-postgres.sh
+endif
+
 .PHONY: provider-login
 provider-login:
 	$(MAKE) -C iac/provider-$(PROVIDER) provider-login
@@ -176,11 +180,11 @@ migrate:
 
 .PHONY: prep-cluster
 prep-cluster:
-	$(MAKE) -C packages/shared prep-cluster
+	@$(POSTGRES_ENV_COMMAND) make -C packages/shared prep-cluster
 
 .PHONY: seed-db
 seed-db:
-	$(MAKE) -C packages/db seed-db
+	@$(POSTGRES_ENV_COMMAND) make -C packages/db seed-db
 
 .PHONY: set-env
 set-env:

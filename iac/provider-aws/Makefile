@@ -27,6 +27,7 @@ tf_vars := AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) \
 	$(call tfvar, PREFIX) \
 	$(call tfvar, DOMAIN_NAME) \
 	$(call tfvar, INGRESS_CERTIFICATE_ARN) \
+	$(call tfvar, INGRESS_CERTIFICATE_VALIDATION_ZONE_ID) \
 	$(call tfvar, INGRESS_ALLOWED_CIDR_BLOCKS) \
 	$(call tfvar, INGRESS_ALLOWED_SECURITY_GROUP_IDS) \
 	$(call tfvar, ENABLE_ALB_DELETION_PROTECTION) \
@@ -48,6 +49,7 @@ tf_vars := AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) \
 	$(call tfvar, REDIS_MANAGED) \
 	$(call tfvar, REDIS_REPLICA_SIZE) \
 	$(call tfvar, POSTGRES_ENGINE_VERSION) \
+	$(call tfvar, POSTGRES_ADMIN_INGRESS_SECURITY_GROUP_IDS) \
 	$(call tfvar, POSTGRES_INSTANCE_CLASS) \
 	$(call tfvar, POSTGRES_ALLOCATED_STORAGE) \
 	$(call tfvar, POSTGRES_MAX_ALLOCATED_STORAGE) \
@@ -116,7 +118,11 @@ plan: verify-account
 .PHONY: request-certificate
 request-certificate: verify-account
 	@test -z "$(INGRESS_CERTIFICATE_ARN)" || (echo "INGRESS_CERTIFICATE_ARN is already set; Terraform will use that certificate" && exit 1)
-	@ $(tf_vars) $(TF) apply $(TF_VAR_FILE_ARG) -target=aws_acm_certificate.ingress -auto-approve -input=false -compact-warnings
+	@if [ -n "$(INGRESS_CERTIFICATE_VALIDATION_ZONE_ID)" ]; then \
+		$(tf_vars) $(TF) apply $(TF_VAR_FILE_ARG) -target=aws_acm_certificate_validation.ingress -auto-approve -input=false -compact-warnings; \
+	else \
+		$(tf_vars) $(TF) apply $(TF_VAR_FILE_ARG) -target=aws_acm_certificate.ingress -auto-approve -input=false -compact-warnings; \
+	fi
 	@ $(tf_vars) $(TF) output -json certificate_dns_validation_records
 
 .PHONY: certificate-validation-records

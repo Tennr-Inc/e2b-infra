@@ -7,7 +7,6 @@ required_variables=(
   AWS_ACCOUNT_ID
   AWS_REGION
   DOMAIN_NAME
-  INGRESS_ALLOWED_CIDR_BLOCKS
   VPC_CIDR
   VPC_AVAILABILITY_ZONES
   VPC_PUBLIC_SUBNETS
@@ -55,7 +54,6 @@ if [[ "$actual_account" != "$AWS_ACCOUNT_ID" ]]; then
 fi
 
 for json_variable in \
-  INGRESS_ALLOWED_CIDR_BLOCKS \
   VPC_AVAILABILITY_ZONES \
   VPC_PUBLIC_SUBNETS \
   VPC_PRIVATE_SUBNETS \
@@ -66,9 +64,54 @@ for json_variable in \
   fi
 done
 
-if jq -e 'index("0.0.0.0/0") != null' <<<"$INGRESS_ALLOWED_CIDR_BLOCKS" >/dev/null; then
+for json_variable in \
+  INGRESS_ALLOWED_CIDR_BLOCKS \
+  INGRESS_ALLOWED_SECURITY_GROUP_IDS \
+  POSTGRES_ADMIN_INGRESS_SECURITY_GROUP_IDS; do
+  json_value="${!json_variable:-[]}"
+  if ! jq -e 'type == "array"' <<<"$json_value" >/dev/null; then
+    echo "$json_variable must be a JSON array"
+    exit 1
+  fi
+done
+
+ingress_allowed_cidr_blocks="${INGRESS_ALLOWED_CIDR_BLOCKS:-[]}"
+ingress_allowed_security_group_ids="${INGRESS_ALLOWED_SECURITY_GROUP_IDS:-[]}"
+
+if [[ $(jq 'length' <<<"$ingress_allowed_cidr_blocks") -eq 0 && $(jq 'length' <<<"$ingress_allowed_security_group_ids") -eq 0 ]]; then
+  echo "Configure at least one private ingress CIDR or security group"
+  exit 1
+fi
+
+if jq -e 'index("0.0.0.0/0") != null' <<<"$ingress_allowed_cidr_blocks" >/dev/null; then
   echo "INGRESS_ALLOWED_CIDR_BLOCKS must not contain 0.0.0.0/0"
   exit 1
+fi
+
+for security_group_variable in INGRESS_ALLOWED_SECURITY_GROUP_IDS POSTGRES_ADMIN_INGRESS_SECURITY_GROUP_IDS; do
+  security_group_values="${!security_group_variable:-[]}"
+  if ! jq -e 'all(.[]; type == "string" and test("^sg-[0-9a-f]+$"))' <<<"$security_group_values" >/dev/null; then
+    echo "$security_group_variable must contain only security group IDs"
+    exit 1
+  fi
+done
+
+if [[ -n "${INGRESS_CERTIFICATE_VALIDATION_ZONE_ID:-}" ]]; then
+  hosted_zone_json=$(aws route53 get-hosted-zone \
+    --profile "$AWS_PROFILE" \
+    --id "$INGRESS_CERTIFICATE_VALIDATION_ZONE_ID" \
+    --output json)
+  if [[ $(jq -r '.HostedZone.Config.PrivateZone' <<<"$hosted_zone_json") == "true" ]]; then
+    echo "INGRESS_CERTIFICATE_VALIDATION_ZONE_ID must identify a public hosted zone"
+    exit 1
+  fi
+
+  hosted_zone_name=$(jq -r '.HostedZone.Name' <<<"$hosted_zone_json")
+  hosted_zone_name="${hosted_zone_name%.}"
+  if [[ "$DOMAIN_NAME" != "$hosted_zone_name" && "$DOMAIN_NAME" != *".$hosted_zone_name" ]]; then
+    echo "Public hosted zone $hosted_zone_name is not authoritative for $DOMAIN_NAME"
+    exit 1
+  fi
 fi
 
 if [[ -n "${PEER_VPC_ID:-}" || -n "${PEER_VPC_CIDR:-}" || -n "${PEER_ROUTE_TABLE_IDS:-}" ]]; then
@@ -130,7 +173,11 @@ if [[ -n "${INGRESS_CERTIFICATE_ARN:-}" ]]; then
     exit 1
   fi
 else
-  echo "No existing ingress certificate configured; run make request-certificate after make init"
+  if [[ -n "${INGRESS_CERTIFICATE_VALIDATION_ZONE_ID:-}" ]]; then
+    echo "Terraform will request and validate the ingress certificate in public Route53 zone $INGRESS_CERTIFICATE_VALIDATION_ZONE_ID"
+  else
+    echo "No existing ingress certificate or public Route53 zone configured; run make request-certificate after make init and publish its validation record"
+  fi
 fi
 
 echo "AWS private staging preflight passed for account $AWS_ACCOUNT_ID in $AWS_REGION"

@@ -101,7 +101,9 @@ Now, you should see the right quota options in `All Quotas` and be able to reque
 ## AWS
 
 For a dedicated VPC, internal-only ingress, and VPC peering deployment, follow the
-[private AWS staging runbook](docs/aws-private-staging.md) alongside the steps below.
+[private AWS staging runbook](docs/aws-private-staging.md) alongside the steps below. Use the
+[private AWS production runbook](docs/aws-private-production.md) when promoting into another
+account.
 
 ### Additional Prerequisites
 
@@ -126,8 +128,12 @@ For a dedicated VPC, internal-only ingress, and VPC peering deployment, follow t
     - `DOMAIN_NAME` - private DNS suffix, for example `e2b.staging.internal.example.com`
     - `INGRESS_CERTIFICATE_ARN` - optional existing ACM certificate covering `*.${DOMAIN_NAME}`;
       leave empty to request one with `make request-certificate`
+    - `INGRESS_CERTIFICATE_VALIDATION_ZONE_ID` - optional public Route53 zone where OpenTofu should
+      create the ACM ownership-validation CNAME
     - `INGRESS_ALLOWED_CIDR_BLOCKS` - JSON list of private CIDRs allowed to reach HTTPS ingress
     - `INGRESS_ALLOWED_SECURITY_GROUP_IDS` - optional JSON list of connector security groups allowed to reach HTTPS ingress
+    - `POSTGRES_ADMIN_INGRESS_SECURITY_GROUP_IDS` - optional JSON list of private connector security
+      groups allowed to administer RDS on port 5432 during bootstrap
     - `VPC_CIDR`, `VPC_AVAILABILITY_ZONES`, `VPC_PUBLIC_SUBNETS`, `VPC_PRIVATE_SUBNETS`, and `VPC_ELASTICACHE_SUBNETS` - the dedicated, non-overlapping E2B network layout
     - `PEER_VPC_ID`, `PEER_VPC_CIDR`, and `PEER_ROUTE_TABLE_IDS` - optional same-account, same-region peering configuration
     - `TERRAFORM_ENVIRONMENT` - one of `prod`, `staging`, `dev`
@@ -140,9 +146,11 @@ For a dedicated VPC, internal-only ingress, and VPC peering deployment, follow t
     - ECR repositories for container images
     - S3 buckets for templates, kernels, builds, and backups
     - Secrets in AWS Secrets Manager (with placeholder values for optional integrations)
-6. If `INGRESS_CERTIFICATE_ARN` is empty, run `make request-certificate`, publish the printed CNAME
-   in authoritative public DNS, and wait for ACM to issue the certificate. This record performs
-   validation only; E2B service DNS remains private.
+6. If `INGRESS_CERTIFICATE_ARN` is empty, run `make request-certificate`. When
+   `INGRESS_CERTIFICATE_VALIDATION_ZONE_ID` identifies an authoritative public Route53 zone,
+   OpenTofu creates the CNAME and waits for ACM. Otherwise publish the printed CNAME in the
+   external authoritative DNS provider. This record validates ownership only; E2B service DNS
+   remains private.
 7. Update the following secrets in [AWS Secrets Manager](https://console.aws.amazon.com/secretsmanager) with actual values:
     - `{prefix}grafana` - JSON with `API_KEY`, `OTLP_URL`, `OTEL_COLLECTOR_TOKEN`, `USERNAME` keys (optional, for monitoring)
     - `{prefix}launch-darkly-api-key` - LaunchDarkly SDK key (optional, for feature flags)

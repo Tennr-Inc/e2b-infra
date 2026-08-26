@@ -14,11 +14,11 @@ resource "aws_db_subnet_group" "this" {
 
 resource "aws_security_group" "this" {
   name        = "${var.prefix}${var.name}"
-  description = "Allow PostgreSQL from E2B cluster nodes"
+  description = "Allow PostgreSQL from approved private security groups"
   vpc_id      = var.vpc_id
 
   ingress {
-    description     = "PostgreSQL from E2B cluster nodes"
+    description     = "PostgreSQL from approved private security groups"
     from_port       = var.port
     to_port         = var.port
     protocol        = "tcp"

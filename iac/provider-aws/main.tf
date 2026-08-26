@@ -263,9 +263,10 @@ module "postgres" {
   deletion_protection     = var.postgres_deletion_protection
   skip_final_snapshot     = var.postgres_skip_final_snapshot
 
-  ingress_security_group_ids = [
-    aws_security_group.cluster_node.id
-  ]
+  ingress_security_group_ids = concat(
+    [aws_security_group.cluster_node.id],
+    var.postgres_admin_ingress_security_group_ids,
+  )
 }
 
 module "cluster" {

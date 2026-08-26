@@ -2,7 +2,11 @@
 
 This runbook deploys E2B into a dedicated AWS VPC and exposes it only to an existing private VPC
 over same-account, same-region VPC peering. It does not create a public load balancer, public E2B
-DNS record, Cloudflare Tunnel, or inbound route from the internet.
+routing record, Cloudflare Tunnel, or inbound route from the internet. It may create the public
+ACM ownership-validation CNAME when an authoritative Route53 zone is supplied.
+
+For promotion into a separate production account, including the staging workarounds that are now
+automated, see [Private AWS production deployment](aws-private-production.md).
 
 ## Resulting boundary
 
@@ -52,15 +56,18 @@ make request-certificate
 `make init` creates the encrypted, versioned Terraform state bucket and the initialization module
 (VPC, endpoints, artifact buckets, ECR repositories, and secret containers). When
 `INGRESS_CERTIFICATE_ARN` is empty, `make request-certificate` creates an ACM certificate request
-and prints its DNS validation CNAME.
+and prints its DNS validation CNAME. If `INGRESS_CERTIFICATE_VALIDATION_ZONE_ID` identifies the
+authoritative public Route53 zone, OpenTofu also publishes the CNAME and waits for ACM to issue the
+certificate.
 
-Publish that single CNAME in the public authoritative DNS provider. It proves domain ownership to
-ACM; it does not resolve an E2B service or expose the internal ALB. Keep the validation CNAME so ACM
-can renew the certificate. Re-run `make certificate-validation-records` if needed, and wait until
-ACM reports `ISSUED` before the full apply.
+When DNS is external, publish that single CNAME in the public authoritative DNS provider. It proves
+domain ownership to ACM; it does not resolve an E2B service or expose the internal ALB. Keep the
+validation CNAME so ACM can renew the certificate. Re-run `make certificate-validation-records` if
+needed, and wait until ACM reports `ISSUED` before the full apply.
 
 If an issued wildcard certificate already exists, set `INGRESS_CERTIFICATE_ARN` and skip these two
-certificate commands.
+certificate commands. When the authoritative public DNS zone is Route53, set
+`INGRESS_CERTIFICATE_VALIDATION_ZONE_ID` and OpenTofu will publish the validation record instead.
 
 ## Build and deploy
 
@@ -92,6 +99,11 @@ Finally initialize tenant data and a base template:
 ```sh
 make prep-cluster
 ```
+
+On AWS this retrieves the generated private RDS connection string from Secrets Manager. Your local
+machine must be able to reach the RDS endpoint, for example through an administrator-only Twingate
+resource whose connector security group is listed in
+`POSTGRES_ADMIN_INGRESS_SECURITY_GROUP_IDS`.
 
 ## Sandbox egress policy
 
