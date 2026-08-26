@@ -1,5 +1,6 @@
 locals {
-  scripts_path = var.scripts_path != "" ? var.scripts_path : "${path.module}/scripts"
+  scripts_path        = var.scripts_path != "" ? var.scripts_path : "${path.module}/scripts"
+  autoscaling_enabled = coalesce(var.max_cluster_size, var.cluster_size) > var.cluster_size
 
   user_data = templatefile("${local.scripts_path}/start-client.sh", {
     NODE_POOL                    = var.node_pool_name
@@ -16,6 +17,12 @@ locals {
     FC_BUSYBOX_BUCKET_NAME      = var.fc_busybox_bucket_name
     NODE_LABELS                 = join(",", var.node_labels)
     BASE_HUGEPAGES_PERCENTAGE   = var.base_hugepages_percentage
+    RESERVED_HOST_MEMORY_MIB    = coalesce(var.reserved_host_memory_mib, 0)
+    CAPACITY_REPORTER_SETUP = local.autoscaling_enabled ? templatefile("${path.module}/scripts/install-capacity-reporter.sh.tftpl", {
+      reporter_base64 = filebase64("${path.module}/scripts/report-capacity.py")
+      asg_name        = "${var.prefix}${var.name}"
+      aws_region      = data.aws_region.current.id
+    }) : ""
 
     AWS_ECR_ACCOUNT_REPOSITORY_DOMAIN = var.aws_ecr_account_repository_domain
 
@@ -128,6 +135,10 @@ resource "aws_launch_template" "client" {
   instance_type = var.machine_type
   user_data     = base64encode(local.user_data)
 
+  monitoring {
+    enabled = local.autoscaling_enabled
+  }
+
   vpc_security_group_ids = var.security_group_ids
 
   metadata_options {
@@ -145,6 +156,8 @@ resource "aws_launch_template" "client" {
       volume_size           = var.boot_disk_size_gb
       volume_type           = "gp3"
       delete_on_termination = true
+      encrypted             = true
+      kms_key_id            = var.ebs_kms_key_arn
     }
   }
 
@@ -169,8 +182,10 @@ resource "aws_autoscaling_group" "client" {
   vpc_zone_identifier = var.vpc_private_subnets
   health_check_type   = "EC2"
 
-  min_size = var.cluster_size
-  max_size = var.cluster_size
+  min_size                = var.cluster_size
+  max_size                = coalesce(var.max_cluster_size, var.cluster_size)
+  default_instance_warmup = local.autoscaling_enabled ? 600 : null
+  protect_from_scale_in   = local.autoscaling_enabled
 
   launch_template {
     id      = aws_launch_template.client.id

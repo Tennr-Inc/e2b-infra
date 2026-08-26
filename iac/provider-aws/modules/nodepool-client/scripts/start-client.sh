@@ -165,6 +165,13 @@ remove_decimal() {
 
 reserved_normal_ram=$(max $min_normal_ram $min_normal_percentage_ram)
 reserved_normal_ram=$(min $reserved_normal_ram $max_normal_ram)
+if (( ${RESERVED_HOST_MEMORY_MIB} > 0 )); then
+    reserved_normal_ram=${RESERVED_HOST_MEMORY_MIB}
+fi
+if (( reserved_normal_ram >= available_ram )); then
+    echo "Host memory reserve must be smaller than total RAM" >&2
+    exit 1
+fi
 echo "- Reserved RAM: $reserved_normal_ram MiB"
 
 # The huge pages RAM should still be usable for normal pages in most cases.
@@ -189,6 +196,13 @@ overcommitment_hugepages=$(($hugepages * $overcommitment_hugepages_percentage / 
 overcommitment_hugepages=$(remove_decimal $overcommitment_hugepages)
 echo "- Allocating $overcommitment_hugepages huge pages ($overcommitment_hugepages_percentage%) for overcommitment"
 echo $overcommitment_hugepages >/proc/sys/vm/nr_overcommit_hugepages
+
+cat > /etc/sysctl.d/90-e2b-hugepages.conf <<EOF
+vm.nr_overcommit_hugepages=$overcommitment_hugepages
+vm.nr_hugepages=$base_hugepages
+EOF
+
+${CAPACITY_REPORTER_SETUP}
 
 # Start Consul first (in background) with GCE DNS as recursor
 # This allows Consul to handle both .consul queries AND forward internet queries

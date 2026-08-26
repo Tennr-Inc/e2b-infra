@@ -69,7 +69,7 @@ resource "aws_security_group" "vpc_endpoint" {
     from_port       = 443
     to_port         = 443
     protocol        = "TCP"
-    security_groups = var.vpc_endpoint_ingress_subnet_ids
+    security_groups = var.vpc_endpoint_ingress_security_group_ids
   }
 
   egress {

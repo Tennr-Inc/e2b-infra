@@ -1,15 +1,24 @@
 ENV := $(shell cat .last_used_env || echo "not-set")
 ENV_FILE := .env.${ENV}
 PROVIDER ?= gcp
+TF ?= $(shell command -v tofu 2>/dev/null || command -v terraform 2>/dev/null)
 
 -include ${ENV_FILE}
 
 AWS_BUCKET_PREFIX ?= $(PREFIX)$(AWS_ACCOUNT_ID)-
 GCP_BUCKET_PREFIX ?= $(GCP_PROJECT_ID)-
 
+ifeq ($(PROVIDER),aws)
+POSTGRES_ENV_COMMAND := AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" POSTGRES_CONNECTION_STRING_SECRET_NAME="$(PREFIX)postgres-connection-string" ./scripts/with-aws-postgres.sh
+endif
+
 .PHONY: provider-login
 provider-login:
 	$(MAKE) -C iac/provider-$(PROVIDER) provider-login
+
+.PHONY: aws-private-preflight
+aws-private-preflight:
+	@set -a; . ./${ENV_FILE}; set +a; ./scripts/aws-private-preflight.sh
 
 .PHONY: init
 init:
@@ -27,6 +36,15 @@ download-prod-env:
 .PHONY: plan
 plan:
 	$(MAKE) -C iac/provider-$(PROVIDER) plan
+
+.PHONY: request-certificate
+request-certificate:
+	./scripts/confirm.sh $(TERRAFORM_ENVIRONMENT)
+	$(MAKE) -C iac/provider-$(PROVIDER) request-certificate
+
+.PHONY: certificate-validation-records
+certificate-validation-records:
+	$(MAKE) -C iac/provider-$(PROVIDER) certificate-validation-records
 
 # Deploy all jobs in Nomad
 .PHONY: plan-only-jobs
@@ -163,11 +181,11 @@ migrate:
 
 .PHONY: prep-cluster
 prep-cluster:
-	$(MAKE) -C packages/shared prep-cluster
+	@$(POSTGRES_ENV_COMMAND) make -C packages/shared prep-cluster
 
 .PHONY: seed-db
 seed-db:
-	$(MAKE) -C packages/db seed-db
+	@$(POSTGRES_ENV_COMMAND) make -C packages/db seed-db
 
 .PHONY: set-env
 set-env:
@@ -205,7 +223,7 @@ connect-orchestrator:
 .PHONY: fmt
 fmt:
 	golangci-lint fmt
-	terraform fmt -recursive
+	$(TF) fmt -recursive
 
 .PHONY: lint
 lint:
