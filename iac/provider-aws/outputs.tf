@@ -3,6 +3,11 @@ output "vpc_id" {
   value       = module.init.vpc_id
 }
 
+output "vpc_private_subnet_ids" {
+  description = "Private workload subnets suitable for private-access connectors"
+  value       = module.init.vpc_private_subnet_ids
+}
+
 output "private_alb_dns_name" {
   description = "AWS-generated DNS name for the internal E2B ALB"
   value       = aws_lb.ingress.dns_name

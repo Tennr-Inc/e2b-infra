@@ -93,6 +93,11 @@ run "private_staging_topology" {
   }
 
   assert {
+    condition     = length(output.vpc_private_subnet_ids) == 3
+    error_message = "Operators must be able to discover all private workload subnets for connector deployment."
+  }
+
+  assert {
     condition     = aws_lb_listener.ingress_wildcard.port == 443 && aws_lb_listener.ingress_wildcard.protocol == "HTTPS"
     error_message = "The E2B ALB must expose HTTPS only."
   }
