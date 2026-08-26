@@ -27,13 +27,23 @@ if [[ ${#missing_variables[@]} -gt 0 ]]; then
   exit 1
 fi
 
-required_commands=(aws jq terraform packer docker go npm make)
+if [[ -n "${TF:-}" ]]; then
+  iac_command="$TF"
+elif command -v tofu >/dev/null 2>&1; then
+  iac_command="tofu"
+else
+  iac_command="terraform"
+fi
+
+required_commands=(aws jq "$iac_command" packer docker go npm make)
 for command_name in "${required_commands[@]}"; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "Missing required command: $command_name"
     exit 1
   fi
 done
+
+echo "Using $iac_command for infrastructure commands"
 
 actual_account=$(aws sts get-caller-identity \
   --profile "$AWS_PROFILE" \
