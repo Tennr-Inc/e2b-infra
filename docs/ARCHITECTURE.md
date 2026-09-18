@@ -121,6 +121,16 @@ The control-plane entry point (Gin, OpenAPI-generated from `spec/openapi.yml`, p
 - **State**: writes sandbox records to Redis (source of truth for *running* sandboxes) and the
   sandbox→node **routing catalog** in Redis that client-proxy reads. Persistent entities
   (templates, builds, snapshots, teams) live in Postgres.
+- **Crash reconciliation**: for the API-managed local cluster, each node-sync cycle scans running
+  records once and compares them with complete, successful inventories from their owning nodes.
+  A missing candidate is
+  checked again under the sandbox lifecycle lock before its execution-scoped route and running
+  record are retired. A connect/timeout update returning `NotFound` uses the same reconciliation.
+  In-flight creation reservations, pause/checkpoint transitions, malformed or failed inventories,
+  and newer executions prevent retirement. If the second check is inconclusive, the update fails
+  without returning a replacement-authorizing 404. Retirement does not kill compute or delete
+  snapshots; a failed routing cleanup leaves the running record available for retry. Remote
+  enterprise-edge routing keeps its existing lifecycle; this reconciler does not manage it.
 - **Secrets**: `/secrets` is the only public surface for secret management (create, list, get,
   update, delete). The API authenticates the caller with the customer alternatives above, converts
   the authenticated team UUID to the project UUID the backend knows, checks the `customer-secrets`

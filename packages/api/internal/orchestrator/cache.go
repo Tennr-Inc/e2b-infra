@@ -88,24 +88,41 @@ func (o *Orchestrator) syncNodes(ctx context.Context, store *sandbox.Store, skip
 	ctx, syncNodesSpan := tracer.Start(ctx, "keep-in-sync-existing")
 	defer syncNodesSpan.End()
 
+	// One bounded fleet scan per cycle, before any absence observations. Failed
+	// team reads only omit cleanup candidates; they never establish node absence.
+	running, err := store.AllRunningItems(ctx)
+	if err != nil {
+		logger.L().Error(ctx, "Failed to read runtime reconciliation candidates", zap.Error(err))
+	}
+	type owner struct {
+		clusterID uuid.UUID
+		nodeID    string
+	}
+	byNode := make(map[owner][]sandbox.Sandbox)
+	for _, sbx := range running {
+		key := owner{sbx.ClusterID, sbx.NodeID}
+		byNode[key] = append(byNode[key], sbx)
+	}
 	defer wg.Wait()
 	for _, n := range o.nodes.Items() {
+		known := byNode[owner{n.ClusterID, n.ID}]
+
 		wg.Go(func() {
 			// cluster and local nodes needs to by synced differently,
 			// because each of them is taken from different source pool
 			var err error
 			switch {
 			case !n.IsNomadManaged():
-				err = o.syncClusterNode(ctx, n, store)
+				err = o.syncClusterNode(ctx, n, store, known...)
 			case skipSyncingWithNomad:
 				// In local mode there is no Nomad discovery list to validate
 				// membership against, so sync the statically-connected node
 				// directly instead of evicting it every cycle. node.Sync still
 				// marks the node unhealthy if the orchestrator is unreachable,
 				// and only errors when the conn is shut down for good.
-				err = n.Sync(ctx, store)
+				err = n.Sync(ctx, store, known...)
 			default:
-				err = o.syncNode(ctx, n, nomadNodes, store)
+				err = o.syncNode(ctx, n, nomadNodes, store, known...)
 			}
 			if err != nil {
 				logger.L().Error(ctx, "Error syncing node", zap.Error(err))
@@ -170,7 +187,7 @@ func (o *Orchestrator) syncClusterDiscoveredNodes(ctx context.Context) {
 	}
 }
 
-func (o *Orchestrator) syncClusterNode(ctx context.Context, node *nodemanager.Node, store *sandbox.Store) error {
+func (o *Orchestrator) syncClusterNode(ctx context.Context, node *nodemanager.Node, store *sandbox.Store, known ...sandbox.Sandbox) error {
 	ctx, childSpan := tracer.Start(ctx, "sync-cluster-node")
 	telemetry.SetAttributes(ctx, telemetry.WithNodeID(node.ID), telemetry.WithClusterID(node.ClusterID))
 	defer childSpan.End()
@@ -189,10 +206,10 @@ func (o *Orchestrator) syncClusterNode(ctx context.Context, node *nodemanager.No
 	}
 
 	// Unified call for syncing node state across different node types
-	return node.Sync(ctx, store)
+	return node.Sync(ctx, store, known...)
 }
 
-func (o *Orchestrator) syncNode(ctx context.Context, node *nodemanager.Node, discovered []nodemanager.NomadServiceDiscovery, store *sandbox.Store) error {
+func (o *Orchestrator) syncNode(ctx context.Context, node *nodemanager.Node, discovered []nodemanager.NomadServiceDiscovery, store *sandbox.Store, known ...sandbox.Sandbox) error {
 	ctx, childSpan := tracer.Start(ctx, "sync-node")
 	telemetry.SetAttributes(ctx, telemetry.WithNodeID(node.ID))
 	defer childSpan.End()
@@ -211,5 +228,5 @@ func (o *Orchestrator) syncNode(ctx context.Context, node *nodemanager.Node, dis
 	}
 
 	// Unified call for syncing node state across different node types
-	return node.Sync(ctx, store)
+	return node.Sync(ctx, store, known...)
 }

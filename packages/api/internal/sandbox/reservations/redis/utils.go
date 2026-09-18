@@ -7,7 +7,6 @@ import (
 
 const (
 	reservationsKey = "reservations"
-	pendingKey      = "pending"
 	resultKey       = "result"
 	notifySuffix    = "notify"
 )
@@ -26,7 +25,7 @@ func getReservationPrefix(teamID string) string {
 // getPendingSetKey returns the key for the pending set of sandbox IDs being created.
 // e.g. sandbox:storage:{teamID}:reservations:pending
 func getPendingSetKey(teamID string) string {
-	return redis_utils.CreateKey(getReservationPrefix(teamID), pendingKey)
+	return storage_redis.GetSandboxReservationPendingKey(teamID)
 }
 
 // getResultKey returns the key for a sandbox creation result.

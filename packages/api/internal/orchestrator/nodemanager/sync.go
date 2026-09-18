@@ -19,7 +19,7 @@ const syncMaxRetries = 4
 // Sync refreshes the node's status and sandbox list. A non-nil error means the
 // gRPC connection is permanently gone and the caller must deregister the node;
 // all other failures are handled locally (retries, then unhealthy) and return nil.
-func (n *Node) Sync(ctx context.Context, store *sandbox.Store) error {
+func (n *Node) Sync(ctx context.Context, store *sandbox.Store, known ...sandbox.Sandbox) error {
 	syncRetrySuccess := false
 
 	// Tracked separately from success because the two answer different
@@ -72,7 +72,7 @@ func (n *Node) Sync(ctx context.Context, store *sandbox.Store) error {
 		// Update host metrics from service info
 		n.UpdateMetricsFromServiceInfoResponse(nodeInfo)
 
-		orphanCandidates, instancesErr := n.GetOrphanCandidates(ctx)
+		orphanCandidates, complete, instancesErr := n.getSandboxInventory(ctx)
 		if instancesErr != nil {
 			logger.L().Error(ctx, "Error getting instances", zap.Error(instancesErr), logger.WithNodeID(n.ID))
 
@@ -80,6 +80,11 @@ func (n *Node) Sync(ctx context.Context, store *sandbox.Store) error {
 		}
 
 		store.Reconcile(ctx, orphanCandidates, n.ID)
+		if complete && !n.IsClusterNode() {
+			// Remote cluster routing is owned by the enterprise edge; this
+			// API can atomically guard cleanup only in its own routing catalog.
+			n.retireMissingSandboxes(ctx, store, known, orphanCandidates)
+		}
 
 		syncRetrySuccess = true
 
@@ -105,4 +110,24 @@ func (n *Node) Sync(ctx context.Context, store *sandbox.Store) error {
 	}
 
 	return nil
+}
+
+// Candidates were read before List. Re-check each absence under the store lock:
+// a checkpoint can temporarily remove a runtime from the node's inventory.
+func (n *Node) retireMissingSandboxes(ctx context.Context, store *sandbox.Store, known []sandbox.Sandbox, reported []sandbox.NodeSandbox) {
+	present := make(map[string]bool, len(reported))
+	for _, sbx := range reported {
+		present[sbx.SandboxID] = true
+	}
+	for _, sbx := range known {
+		if sbx.NodeID != n.ID || sbx.ClusterID != n.ClusterID || present[sbx.SandboxID] {
+			continue
+		}
+		removed, err := store.RetireMissing(ctx, sbx, n.ConfirmsSandboxMissing)
+		if err != nil {
+			logger.L().Error(ctx, "Failed to reconcile missing sandbox", zap.Error(err), logger.WithSandboxID(sbx.SandboxID))
+		} else if removed {
+			logger.L().Info(ctx, "Retired missing sandbox execution", logger.WithSandboxID(sbx.SandboxID), zap.String("execution_id", sbx.ExecutionID))
+		}
+	}
 }

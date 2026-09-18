@@ -63,6 +63,11 @@ func GetTeamPrefix(teamID string) string {
 	return redis_utils.CreateKey(sandboxKeyPrefix, redis_utils.SameSlot(teamID))
 }
 
+// GetSandboxReservationPendingKey shares the creation fence with reconciliation.
+func GetSandboxReservationPendingKey(teamID string) string {
+	return redis_utils.CreateKey(GetTeamPrefix(teamID), "reservations", "pending")
+}
+
 func getSandboxKey(teamID, sandboxID string) string {
 	return redis_utils.CreateKey(GetTeamPrefix(teamID), sandboxesKey, sandboxID)
 }

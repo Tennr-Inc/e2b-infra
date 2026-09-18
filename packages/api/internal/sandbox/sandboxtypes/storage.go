@@ -18,6 +18,8 @@ type Storage interface {
 
 	TeamItems(ctx context.Context, teamID uuid.UUID, states []State) ([]Sandbox, error)
 	ExpiredItems(ctx context.Context) ([]Sandbox, error)
+	AllRunningItems(ctx context.Context) ([]Sandbox, error)
+	RetireMissing(ctx context.Context, expected Sandbox, confirm func(context.Context, Sandbox) (bool, error)) (bool, error)
 	TeamsWithSandboxCount(ctx context.Context) (map[uuid.UUID]int64, error)
 
 	Update(ctx context.Context, teamID uuid.UUID, sandboxID string, updateFunc func(sandbox Sandbox) (Sandbox, error)) (Sandbox, error)
