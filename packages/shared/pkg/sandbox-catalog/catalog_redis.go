@@ -114,10 +114,10 @@ func (c *RedisSandboxCatalog) DeleteSandbox(ctx context.Context, sandboxID strin
 
 	outcome, err := deleteIfSameExecution.Run(ctx, c.redisClient, []string{c.getCatalogKey(sandboxID)}, executionID).Int()
 	if err != nil {
-		// Best-effort cleanup — never fail the caller (as the original did not); the entry has a TTL.
-		logger.L().Warn(ctx, "sandbox catalog delete did not complete; entry will expire via TTL", logger.WithSandboxID(sandboxID), zap.Error(err))
+		// Callers that reconcile missing runtimes retain their record for retry.
+		logger.L().Warn(ctx, "sandbox catalog delete did not complete", logger.WithSandboxID(sandboxID), zap.Error(err))
 
-		return nil
+		return fmt.Errorf("delete sandbox routing entry: %w", err)
 	}
 
 	switch outcome {

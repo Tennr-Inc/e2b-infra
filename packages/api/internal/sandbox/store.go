@@ -47,6 +47,8 @@ type Callbacks struct {
 	// KillOrphanSandbox kills an orphaned sandbox on the orchestrator node via gRPC.
 	// Used during sync when the Redis backend detects sandboxes running on a node but not present in the store.
 	KillOrphanSandbox OrphanCallback
+	// RemoveMissingSandboxRoute removes only the observed execution's routing entry.
+	RemoveMissingSandboxRoute func(context.Context, Sandbox) error
 }
 
 type Store struct {
@@ -119,6 +121,33 @@ func (s *Store) TeamItems(ctx context.Context, teamID uuid.UUID, states []State)
 
 func (s *Store) ExpiredItems(ctx context.Context) ([]Sandbox, error) {
 	return s.storage.ExpiredItems(ctx)
+}
+
+func (s *Store) AllRunningItems(ctx context.Context) ([]Sandbox, error) {
+	return s.storage.AllRunningItems(ctx)
+}
+
+// RetireMissing confirms absence while lifecycle transitions are excluded. Route
+// cleanup precedes record removal so failed cleanup remains discoverable on retry.
+// Snapshots and reservation results are not part of runtime retirement.
+func (s *Store) RetireMissing(ctx context.Context, expected Sandbox, confirm func(context.Context, Sandbox) (bool, error)) (bool, error) {
+	return s.storage.RetireMissing(ctx, expected, func(ctx context.Context, current Sandbox) (bool, error) {
+		missing, err := confirm(ctx, current)
+		if err != nil || !missing {
+			return false, err
+		}
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		if s.callbacks.RemoveMissingSandboxRoute == nil {
+			return false, errors.New("missing sandbox routing cleanup is not configured")
+		}
+		if err := s.callbacks.RemoveMissingSandboxRoute(ctx, current); err != nil {
+			return false, err
+		}
+
+		return true, nil
+	})
 }
 
 func (s *Store) TeamsWithSandboxes(ctx context.Context) (map[uuid.UUID]int64, error) {

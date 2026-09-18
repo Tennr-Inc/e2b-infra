@@ -1,6 +1,7 @@
 package sandbox_catalog
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -8,6 +9,19 @@ import (
 
 	redis_utils "github.com/e2b-dev/infra/packages/shared/pkg/redis"
 )
+
+func TestDeleteSandbox_PropagatesFailureForReconciliationRetry(t *testing.T) {
+	t.Parallel()
+	client := redis_utils.SetupInstance(t)
+	catalog := NewRedisSandboxCatalog(client)
+	require.NoError(t, catalog.StoreSandbox(t.Context(), "retained", testSandboxInfo("exec-1", "node"), time.Minute))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, catalog.DeleteSandbox(ctx, "retained", "exec-1"), context.Canceled)
+	info, err := catalog.GetSandbox(t.Context(), "retained")
+	require.NoError(t, err)
+	require.Equal(t, "exec-1", info.ExecutionID)
+}
 
 func testSandboxInfo(executionID, orchestratorID string) *SandboxInfo {
 	return &SandboxInfo{

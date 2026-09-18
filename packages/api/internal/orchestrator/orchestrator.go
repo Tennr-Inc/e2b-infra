@@ -185,6 +185,9 @@ func New(
 			AddSandboxToRoutingTable: o.addSandboxToRoutingTable,
 			AsyncNewlyCreatedSandbox: o.handleNewlyCreatedSandbox,
 			KillOrphanSandbox:        o.killOrphanSandbox,
+			RemoveMissingSandboxRoute: func(ctx context.Context, sbx sandbox.Sandbox) error {
+				return o.routingCatalog.DeleteSandbox(ctx, sbx.SandboxID, sbx.ExecutionID)
+			},
 		},
 	)
 

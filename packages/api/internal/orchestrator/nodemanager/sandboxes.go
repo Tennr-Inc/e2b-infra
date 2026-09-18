@@ -29,6 +29,13 @@ var tracer = otel.Tracer("github.com/e2b-dev/infra/packages/api/internal/orchest
 // cannot be looked up, so it can be neither confirmed nor killed, and failing
 // here would abort the node sync entirely.
 func (n *Node) GetOrphanCandidates(ctx context.Context) ([]sandbox.NodeSandbox, error) {
+	sandboxes, _, err := n.getSandboxInventory(ctx)
+
+	return sandboxes, err
+}
+
+// getSandboxInventory reports whether the entire response can prove absence.
+func (n *Node) getSandboxInventory(ctx context.Context) ([]sandbox.NodeSandbox, bool, error) {
 	childCtx, childSpan := tracer.Start(ctx, "get-sandboxes-from-orchestrator")
 	defer childSpan.End()
 
@@ -37,9 +44,13 @@ func (n *Node) GetOrphanCandidates(ctx context.Context) ([]sandbox.NodeSandbox, 
 
 	err = utils.UnwrapGRPCError(err)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list sandboxes: %w", err)
+		return nil, false, fmt.Errorf("failed to list sandboxes: %w", err)
 	}
 
+	if res == nil {
+		return nil, false, nil
+	}
+	complete := true
 	sandboxes := res.GetSandboxes()
 
 	sandboxesInfo := make([]sandbox.NodeSandbox, 0, len(sandboxes))
@@ -62,6 +73,7 @@ func (n *Node) GetOrphanCandidates(ctx context.Context) ([]sandbox.NodeSandbox, 
 				logger.WithNodeID(n.ID),
 			)
 
+			complete = false
 			continue
 		}
 
@@ -74,9 +86,13 @@ func (n *Node) GetOrphanCandidates(ctx context.Context) ([]sandbox.NodeSandbox, 
 				logger.WithNodeID(n.ID),
 			)
 
+			complete = false
 			continue
 		}
 
+		if cmp.Or(sbx.GetExecutionId(), config.GetExecutionId()) == "" {
+			complete = false
+		}
 		sandboxesInfo = append(sandboxesInfo, sandbox.NodeSandbox{
 			SandboxID:   sandboxID,
 			TeamID:      teamID,
@@ -89,7 +105,7 @@ func (n *Node) GetOrphanCandidates(ctx context.Context) ([]sandbox.NodeSandbox, 
 		})
 	}
 
-	return sandboxesInfo, nil
+	return sandboxesInfo, complete, nil
 }
 
 func ConvertOrchestratorMountsToDatabaseMounts(mounts []*orchestrator.SandboxVolumeMount) []*types.SandboxVolumeMountConfig {
@@ -105,4 +121,23 @@ func ConvertOrchestratorMountsToDatabaseMounts(mounts []*orchestrator.SandboxVol
 	}
 
 	return results
+}
+
+// ConfirmsSandboxMissing uses a complete, successful node response. It is called
+// under the store lifecycle lock, after excluding create/resume and transitions.
+func (n *Node) ConfirmsSandboxMissing(ctx context.Context, expected sandbox.Sandbox) (bool, error) {
+	if expected.NodeID != n.ID || expected.ClusterID != n.ClusterID {
+		return false, nil
+	}
+	items, complete, err := n.getSandboxInventory(ctx)
+	if err != nil || !complete {
+		return false, err
+	}
+	for _, item := range items {
+		if item.SandboxID == expected.SandboxID {
+			return false, nil
+		}
+	}
+
+	return true, nil
 }
