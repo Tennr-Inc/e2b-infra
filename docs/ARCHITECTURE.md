@@ -321,6 +321,15 @@ gets a response, the sandbox is fully usable. Fresh creates are internally a *re
 template's base snapshot (cold boots happen for filesystem-only templates and builds, or when
 an explicit resume requests one — see pause and resume below; template creates never do).
 
+The API captures the effective `team_limits.max_length_hours` in each running sandbox's
+`MaxInstanceLength`. Reconnect and timeout updates are capped at that sandbox's start time plus
+the captured lifetime; changing the database does not extend existing sandboxes. The self-hosted
+`base_v1` tier and existing base-tier project overrides support at least 24 hours, preserving
+longer operator-configured lifetimes. Other limits and tiers are unchanged. The client's requested
+timeout can be shorter; Tot requests 24 hours and retains kill-on-timeout. See
+[sandbox lifetime rollout](sandbox-lifetime-rollout.md) for migration order, cache propagation,
+and the effect on existing allocations.
+
 ### Sandbox traffic
 
 ```mermaid
