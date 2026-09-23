@@ -826,12 +826,17 @@ make seed-db
 
 E2B_SEED_TEAM_NAME="Tennr production" \
 E2B_SEED_TEAM_SLUG="tennr-production" \
+E2B_SEED_CONCURRENT_SANDBOXES=1000 \
 make seed-db
 ```
 
 Each command prompts for an email and prints a team ID and one raw API key. Store each raw key
 immediately; it cannot be recovered later. The seed command is destructive when rerun for the same
-email, so it is a bootstrap tool rather than a rotation mechanism.
+email, so it is a bootstrap tool rather than a rotation mechanism. The production setting creates
+a per-team limit of 1,000 concurrent sandboxes. The override also captures the tier's other
+effective limits at seed time; keep those fields aligned when changing the tier later. The current
+production team already has this override, so do not rerun the seeder to update it. The AWS
+deployment does not run dashboard-api or a workspace project-limits sync.
 
 Build the `base` template once for each team using that team's bootstrap key:
 
@@ -998,8 +1003,10 @@ POSTGRES_CONNECTION_STRING_SECRET_NAME="${PREFIX}postgres-connection-string" \
     SELECT teams.id,
            teams.name,
            limits.max_ram_mb,
+           limits.concurrent_sandboxes,
            limits.default_free_disk_size_mb,
            limits.max_disk_size_mb,
+           project.concurrent_sandboxes AS project_concurrent_sandboxes,
            (project.team_id IS NOT NULL) AS has_project_override
     FROM public.teams AS teams
     JOIN public.team_limits AS limits ON limits.id = teams.id

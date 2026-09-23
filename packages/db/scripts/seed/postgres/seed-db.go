@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -74,6 +75,16 @@ func main() {
 		return
 	}
 
+	var concurrentSandboxes int64
+	if raw := strings.TrimSpace(os.Getenv("E2B_SEED_CONCURRENT_SANDBOXES")); raw != "" {
+		concurrentSandboxes, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || concurrentSandboxes < 1 {
+			fmt.Println("Error: E2B_SEED_CONCURRENT_SANDBOXES must be a positive integer")
+
+			return
+		}
+	}
+
 	teamUUID := uuid.New()
 
 	teamAPIKey, err := keys.GenerateKey(keys.ApiKeyPrefix)
@@ -89,6 +100,9 @@ func main() {
 	fmt.Printf("  Team name: %s\n", teamName)
 	fmt.Printf("  Team slug: %s\n", teamSlug)
 	fmt.Printf("  Team ID: %s\n", teamUUID)
+	if concurrentSandboxes > 0 {
+		fmt.Printf("  Concurrent sandboxes: %d\n", concurrentSandboxes)
+	}
 	fmt.Printf("  Team API Key: %s\n", teamAPIKey.PrefixedRawValue)
 	fmt.Println()
 
@@ -180,6 +194,27 @@ VALUES ($1, $2, $3, $4, $5, $6)
 `, teamUUID, email, teamName, "base_v1", false, teamSlug)
 	if err != nil {
 		panic(err)
+	}
+
+	if concurrentSandboxes > 0 {
+		// Preserve the tier's other effective limits when setting this team's
+		// concurrency. The team_limits view reads all fields from project_limits
+		// once an override row exists.
+		err = authDb.TestsRawSQL(ctx, `
+INSERT INTO public.project_limits (
+    team_id, max_length_hours, concurrent_sandboxes,
+    concurrent_template_builds, max_vcpu, max_ram_mb, disk_mb,
+    events_ttl_days, default_free_disk_size_mb, max_disk_size_mb
+)
+SELECT id, max_length_hours, $2,
+       concurrent_template_builds, max_vcpu, max_ram_mb, disk_mb,
+       events_ttl_days, default_free_disk_size_mb, max_disk_size_mb
+FROM public.team_limits
+WHERE id = $1
+`, teamUUID, concurrentSandboxes)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	// Create user team
