@@ -22,6 +22,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/sandbox/envd"
+	"github.com/e2b-dev/infra/packages/orchestrator/pkg/template/metadata"
 	"github.com/e2b-dev/infra/packages/shared/pkg/consts"
 	"github.com/e2b-dev/infra/packages/shared/pkg/logger"
 	"github.com/e2b-dev/infra/packages/shared/pkg/telemetry"
@@ -31,6 +32,24 @@ import (
 const (
 	loopDelay = 5 * time.Millisecond
 )
+
+// WithTemplateDefaults restores settings that older envd versions do not carry
+// through a live upgrade. Explicit caller settings take precedence.
+func (e EnvdMetadata) WithTemplateDefaults(templateContext metadata.Context) EnvdMetadata {
+	if e.DefaultUser == nil {
+		user := templateContext.User
+		if user == "" {
+			// Pre-V2 templates did not record their default user.
+			user = "user"
+		}
+		e.DefaultUser = &user
+	}
+	if e.DefaultWorkdir == nil {
+		e.DefaultWorkdir = templateContext.WorkDir
+	}
+
+	return e
+}
 
 // envdInitExitType classifies the outcome of an envd init call.
 type envdInitExitType string

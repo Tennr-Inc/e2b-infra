@@ -17,7 +17,79 @@ import (
 
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/sandbox/envd"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/sandbox/network"
+	"github.com/e2b-dev/infra/packages/orchestrator/pkg/template/metadata"
 )
+
+func TestEnvdTemplateDefaults(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		context metadata.Context
+		envd    EnvdMetadata
+		user    string
+		workdir *string
+	}{
+		{name: "legacy template", user: "user"},
+		{name: "root template", context: metadata.Context{User: "root"}, user: "root"},
+		{
+			name:    "custom template",
+			context: metadata.Context{User: "developer", WorkDir: new("/workspace")},
+			user:    "developer", workdir: new("/workspace"),
+		},
+		{
+			name:    "explicit settings",
+			context: metadata.Context{User: "user", WorkDir: new("/workspace")},
+			envd:    EnvdMetadata{DefaultUser: new("root"), DefaultWorkdir: new("/build")},
+			user:    "root", workdir: new("/build"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tt.envd.WithTemplateDefaults(tt.context)
+			require.NotNil(t, got.DefaultUser)
+			assert.Equal(t, tt.user, *got.DefaultUser)
+			assert.Equal(t, tt.workdir, got.DefaultWorkdir)
+		})
+	}
+}
+
+// A live upgrade replaces envd with a process whose initial default is root.
+// Both the first /init and the post-upgrade /init must restore the template
+// settings, even if the snapshot already contains the wrong in-memory defaults.
+func TestEnvdInitRestoresTemplateDefaults(t *testing.T) { //nolint:paralleltest
+	sbx := newTestSandboxWithBundle("")
+	sbx.Config.Envd = sbx.Config.Envd.WithTemplateDefaults(metadata.Context{
+		User: "user", WorkDir: new("/sandbox/tennr"),
+	})
+
+	var captured []envd.PostInitJSONBody
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body envd.PostInitJSONBody
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		captured = append(captured, body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	orig := sandboxHttpClient
+	sandboxHttpClient = http.Client{Timeout: 5 * time.Second}
+	defer func() { sandboxHttpClient = orig }()
+
+	for range 2 {
+		resp, _, err := sbx.doRequestWithInfiniteRetries(t.Context(), http.MethodPost, server.URL+"/init")
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+	}
+
+	require.Len(t, captured, 2)
+	for _, body := range captured {
+		assert.Equal(t, "user", body.DefaultUser)
+		assert.Equal(t, "/sandbox/tennr", body.DefaultWorkdir)
+	}
+}
 
 func TestClassifyEnvdInitExit(t *testing.T) {
 	t.Parallel()
