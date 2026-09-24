@@ -108,21 +108,8 @@ func (f *Factory) RebootSandbox(
 		return nil, fmt.Errorf("refusing to reboot build %s: not a filesystem-only snapshot and the request did not demand a filesystem boot", buildID)
 	}
 
-	// A cold boot starts envd with no prior state, so unlike a memory resume it
-	// can't inherit the template's default user/workdir from restored RAM — they
-	// must be re-sent via /init, or envd falls back to root and /root. Mirror
-	// finalize's build-time logic (Context.User, with a "user" fallback for
-	// pre-V2 builds that didn't record one).
-	if config.Envd.DefaultUser == nil {
-		defaultUser := meta.Context.User
-		if defaultUser == "" {
-			defaultUser = "user"
-		}
-		config.Envd.DefaultUser = &defaultUser
-	}
-	if config.Envd.DefaultWorkdir == nil {
-		config.Envd.DefaultWorkdir = meta.Context.WorkDir
-	}
+	// A cold boot cannot inherit the template's user/workdir from restored RAM.
+	config.Envd = config.Envd.WithTemplateDefaults(meta.Context)
 
 	// The masked empty memfile is used only for sizing NoopMemory — guest RAM
 	// is FC's own fresh anonymous memory.

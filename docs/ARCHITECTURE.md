@@ -464,7 +464,10 @@ sequenceDiagram
   `packages/shared/pkg/featureflags`), via envd's `POST /upgrade` (see the envd section). It is
   best-effort — a delivery failure before the `exec` leaves the old envd serving — except an
   unrecoverable post-`exec` failure (the new envd never re-initializes), which fails the resume
-  rather than return a permanently unusable sandbox.
+  rather than return a permanently unusable sandbox. On sandbox creation and resume, the
+  orchestrator restores the default user and working directory from template metadata and sends
+  them on every `/init`, including after an upgrade. This supports older envd handovers that
+  omit these settings and repairs snapshots captured with incorrect in-memory defaults.
 - **Envd offline-upgrade on cold-boot resume**: reaches envd too old for the live `/upgrade`
   handover (below `MinEnvdVersionForUpgrade`). When a *filesystem-only* snapshot cold-boots
   (`RebootSandbox`), the orchestrator rewrites `/usr/bin/envd` in the rootfs **before** the VM

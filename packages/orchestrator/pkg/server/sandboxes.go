@@ -292,6 +292,11 @@ func (s *Server) Create(ctx context.Context, req *orchestrator.SandboxCreateRequ
 		return nil, fmt.Errorf("failed to read template metadata: %w", err)
 	}
 
+	// Re-send the template defaults on every /init, including after a live
+	// upgrade. Older envd handovers omit them, leaving the new process as root.
+	// This also repairs snapshots taken after such an upgrade.
+	config.Envd = config.Envd.WithTemplateDefaults(meta.Context)
+
 	fsOnly = meta.IsFilesystemOnly()
 	filesystemBooted = filesystemBoot(meta, req)
 
