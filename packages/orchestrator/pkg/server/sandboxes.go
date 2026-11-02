@@ -1426,6 +1426,9 @@ func (s *Server) snapshotAndCacheSandbox(
 	deferRootfsExport bool,
 	maintainSandbox bool,
 ) (*snapshotResult, error) {
+	if err := s.capacity.BeginSnapshot(buildID); err != nil {
+		return nil, fmt.Errorf("record snapshot durability obligation: %w", err)
+	}
 	meta, err := sbx.Template.Metadata()
 	if err != nil {
 		return nil, fmt.Errorf("no metadata found in template: %w", err)
@@ -1492,6 +1495,11 @@ func (s *Server) snapshotAndCacheSandbox(
 
 	completeUpload := func(ctx context.Context, uploadErr error) {
 		upload.Finish(ctx, uploadErr)
+		if uploadErr == nil {
+			if err := s.capacity.SnapshotUploaded(buildID); err != nil {
+				logger.L().Error(ctx, "snapshot uploaded but retirement journal update failed", zap.Error(err))
+			}
+		}
 
 		if !peerEnabled {
 			return

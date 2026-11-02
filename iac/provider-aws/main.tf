@@ -10,6 +10,11 @@ terraform {
       version = "2.1.0"
     }
 
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.7"
+    }
+
     random = {
       source  = "hashicorp/random"
       version = "~> 3.1"
@@ -274,7 +279,8 @@ module "postgres" {
 }
 
 module "cluster" {
-  source = "./nomad-cluster"
+  client_safe_scale_in_enabled = var.client_safe_scale_in_enabled
+  source                       = "./nomad-cluster"
 
   prefix          = var.prefix
   aws_account_id  = data.aws_caller_identity.current.account_id
@@ -480,4 +486,14 @@ resource "aws_security_group" "cluster_node" {
   tags = {
     Name = "${var.prefix}cluster-node"
   }
+}
+
+module "safe_scale_in" {
+  count         = var.client_safe_scale_in_enabled ? 1 : 0
+  source        = "./modules/safe-scale-in"
+  name          = "${var.prefix}safe-scale-in"
+  asg_name      = module.cluster.sandbox_asg_name
+  asg_arn       = module.cluster.sandbox_asg_arn
+  minimum_nodes = var.client_scale_in_minimum_nodes
+  dry_run       = var.client_scale_in_dry_run
 }

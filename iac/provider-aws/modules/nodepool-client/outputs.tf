@@ -16,3 +16,6 @@ output "capacity_configuration" {
     capacity_metric           = local.admission_enabled ? "SandboxCapacityUtilization" : "SandboxMemoryUtilization"
   }
 }
+
+output "asg_name" { value = aws_autoscaling_group.client.name }
+output "asg_arn" { value = aws_autoscaling_group.client.arn }

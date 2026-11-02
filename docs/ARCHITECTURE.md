@@ -632,6 +632,19 @@ ALB or a public endpoint.
   `client_cluster_size` / `client_max_cluster_size` bounds (1–20 by default). Policies only scale
   out, and new nodes have scale-in protection: removing a node requires draining its sandboxes
   first. New nodes join Nomad and receive the orchestrator system job automatically.
+  The optional safe scale-in controller (`CLIENT_SAFE_SCALE_IN_ENABLED`, initially
+  dry-run) runs as a serialized Lambda on an EventBridge schedule. It keeps one
+  retirement intent in DynamoDB and uses a fixed SSM document to access the host's
+  loopback-only `/retirement` endpoint. Capacity admission and the drain fence share
+  a lock. A journal on `/orchestrator` records each snapshot before creation and
+  clears it only after successful upload; failed uploads and unverified legacy
+  history block removal. The controller waits for natural completion, cancels an
+  unsealed drain if demand returns, and requires a persistent sealed admission
+  fence plus zero commitments and zero pending uploads before terminating the
+  specific EC2 instance with desired-capacity decrement. Native ASG scale-in and
+  protection remain unchanged. Fresh NVMe initialization can establish verified
+  history; existing hosts require a durability audit. See
+  [the scale-in runbook](aws-safe-scale-in.md) for rollout and recovery.
   Roll out the admission-capable orchestrator with the new bootstrap/reporter and metric policy
   on fresh workers; an older binary has no `/capacity` endpoint. Validate concurrent starts,
   full-memory workloads, pause/resume, and checkpoints before draining old workers. Do not

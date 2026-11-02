@@ -272,3 +272,8 @@ variable "client_use_instance_store" {
   type        = bool
   default     = false
 }
+
+variable "client_safe_scale_in_enabled" {
+  type    = bool
+  default = false
+}

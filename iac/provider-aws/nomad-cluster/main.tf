@@ -352,7 +352,8 @@ module "build" {
 }
 
 module "client" {
-  source = "../modules/nodepool-client"
+  safe_scale_in_enabled = var.client_safe_scale_in_enabled
+  source                = "../modules/nodepool-client"
 
   name           = "orch-client"
   prefix         = var.prefix

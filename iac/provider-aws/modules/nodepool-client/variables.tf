@@ -190,3 +190,9 @@ variable "use_instance_store" {
   type        = bool
   default     = false
 }
+
+variable "safe_scale_in_enabled" {
+  type        = bool
+  default     = false
+  description = "Install SSM and initialize retirement history on fresh NVMe only; deploy journal-capable binaries first."
+}

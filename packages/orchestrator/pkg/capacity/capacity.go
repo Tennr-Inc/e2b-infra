@@ -31,8 +31,12 @@ type Snapshot struct {
 }
 
 type Tracker struct {
-	mu    sync.Mutex
-	state Snapshot
+	mu              sync.Mutex
+	state           Snapshot
+	retirement      *retirementState
+	retirementPath  string
+	retirementError error
+	stopping        bool
 }
 
 type reservation struct {
@@ -161,6 +165,9 @@ func (t *Tracker) Acquire(memoryMiB int64) (*Lease, error) {
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.stopping || (t.retirement != nil && t.retirement.Mode != "active") {
+		return nil, fmt.Errorf("%w: node is retiring", ErrExhausted)
+	}
 	if t.state.SandboxesCommitted >= t.state.Sandboxes || memoryMiB > t.state.MemoryMiB-t.state.MemoryCommittedMiB {
 		return nil, fmt.Errorf("%w: committed %d/%d MiB and %d/%d sandboxes; requested %d MiB",
 			ErrExhausted, t.state.MemoryCommittedMiB, t.state.MemoryMiB,

@@ -1,4 +1,15 @@
 mock_provider "aws" {
+  mock_resource "aws_lambda_function" {
+    defaults = { arn = "arn:aws:lambda:us-east-1:123456789012:function:scale-in" }
+  }
+  mock_resource "aws_cloudwatch_event_rule" {
+    defaults = { arn = "arn:aws:events:us-east-1:123456789012:rule/scale-in" }
+  }
+
+  mock_resource "aws_iam_role" {
+    defaults = { arn = "arn:aws:iam::123456789012:role/test" }
+  }
+
   mock_data "aws_iam_policy_document" {
     defaults = {
       json          = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
@@ -67,6 +78,7 @@ mock_provider "external" {}
 mock_provider "http" {}
 mock_provider "nomad" {}
 mock_provider "random" {}
+mock_provider "archive" {}
 
 variables {
   aws_account_id = "123456789012"
@@ -332,5 +344,25 @@ run "nvme_sandbox_cache" {
   assert {
     condition     = module.cluster.sandbox_capacity.instance_type == "m8id.4xlarge" && module.cluster.sandbox_capacity.instance_store_cache && !module.cluster.build_capacity.instance_store_cache
     error_message = "The NVMe cache must be enabled only for the sandbox pool."
+  }
+}
+
+run "safe_scale_in_keeps_native_termination_disabled" {
+  command = plan
+  variables {
+    client_safe_scale_in_enabled     = true
+    client_scale_in_dry_run          = true
+    client_base_hugepages_percentage = 50
+    client_sandbox_memory_limit_mib  = 32768
+    client_max_sandboxes_per_node    = 8
+    client_use_instance_store        = true
+  }
+  assert {
+    condition     = module.safe_scale_in[0].configuration.dry_run && module.safe_scale_in[0].configuration.concurrent_retirements == 1
+    error_message = "Retirement must start in observation mode with one controller."
+  }
+  assert {
+    condition     = module.cluster.sandbox_capacity.scale_in_protection && module.cluster.sandbox_capacity.memory_scale_in_disabled && module.cluster.sandbox_capacity.cpu_scale_in_disabled
+    error_message = "Native ASG scale-in must remain unable to select arbitrary live hosts."
   }
 }

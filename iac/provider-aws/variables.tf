@@ -506,3 +506,19 @@ variable "envd_upgrade_target" {
   type        = string
   default     = "off"
 }
+
+variable "client_safe_scale_in_enabled" {
+  description = "Deploy the retirement controller; requires journal-capable, audited orchestrators."
+  type        = bool
+  default     = false
+}
+variable "client_scale_in_dry_run" {
+  description = "Observe candidates without draining or terminating them."
+  type        = bool
+  default     = true
+}
+variable "client_scale_in_minimum_nodes" {
+  description = "Warm floor in addition to the ASG minimum."
+  type        = number
+  default     = 2
+}

@@ -104,3 +104,15 @@ func NewInfoContainer(clientId string, version string, commit string, instanceID
 
 	return serviceInfo
 }
+
+// RetirementStatus changes only the healthy/standby pair owned by retirement.
+// Never revive an unhealthy or shutting-down node after a cancelled drain.
+func (s *ServiceInfo) RetirementStatus(ctx context.Context, active bool) {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	if active && s.status.Status == orchestratorinfo.ServiceInfoStatus_Standby {
+		s.setStatus(ctx, orchestratorinfo.ServiceInfoStatus_Healthy)
+	} else if !active && s.status.Status == orchestratorinfo.ServiceInfoStatus_Healthy {
+		s.setStatus(ctx, orchestratorinfo.ServiceInfoStatus_Standby)
+	}
+}
