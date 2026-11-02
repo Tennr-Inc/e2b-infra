@@ -272,3 +272,14 @@ variable "client_use_instance_store" {
   type        = bool
   default     = false
 }
+
+variable "client_safe_scale_in_enabled" {
+  type    = bool
+  default = false
+}
+
+variable "client_retirement_history_enabled" {
+  description = "Initialize verified history only on newly formatted NVMe; enable only after every eligible job uses a journal-capable binary."
+  type        = bool
+  default     = false
+}

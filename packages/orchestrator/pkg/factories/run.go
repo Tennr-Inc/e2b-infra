@@ -851,6 +851,18 @@ func run(config cfg.Config, opts Options) (success bool) {
 	if capacityTracker != nil && !reclaimClean {
 		logger.L().Fatal(ctx, "capacity admission requires successful startup reclaim")
 	}
+	if err := capacityTracker.OpenRetirement(capacity.RetirementPath); err != nil {
+		logger.L().Fatal(ctx, "invalid retirement journal", zap.Error(err))
+	}
+	if capacityTracker != nil {
+		state, err := capacityTracker.TransitionRetirement("")
+		if err != nil {
+			logger.L().Fatal(ctx, "cannot read retirement status", zap.Error(err))
+		}
+		if state.Mode != "active" {
+			serviceInfo.SetStatus(ctx, orchestratorinfo.ServiceInfoStatus_Standby)
+		}
+	}
 	sandboxFactory := sandbox.NewFactory(config.BuilderConfig, networkPool, devicePool, featureFlags, hostStatsDelivery, cgroupManager, egressSetup.Proxy, networkAssignHook, sandboxes, sandbox.WithCapacity(capacityTracker))
 
 	// isolated filesystems cache (for nfs proxy)
@@ -865,6 +877,7 @@ func run(config cfg.Config, opts Options) (success bool) {
 	}})
 
 	orchestratorService, err := server.New(ctx, server.ServiceConfig{
+		Capacity:         capacityTracker,
 		Config:           config,
 		SandboxFactory:   sandboxFactory,
 		Tel:              tel,
@@ -1023,6 +1036,9 @@ func run(config cfg.Config, opts Options) (success bool) {
 
 	httpMux := http.NewServeMux()
 	httpMux.Handle("/health", healthcheck.CreateHandler())
+	httpMux.Handle("/retirement", capacityTracker.RetirementHandler(func(mode string) {
+		serviceInfo.RetirementStatus(context.Background(), mode == "active")
+	}))
 	httpMux.Handle("/capacity", capacityTracker.Handler(func() bool {
 		return serviceInfo.GetStatus().Status == orchestratorinfo.ServiceInfoStatus_Healthy
 	}))
@@ -1071,6 +1087,8 @@ func run(config cfg.Config, opts Options) (success bool) {
 	if config.ForceStop {
 		cancelCloseCtx()
 	}
+
+	capacityTracker.StopAdmission()
 
 	// Mark service draining if not already.
 	// If service stats was previously changed via API, we don't want to override it.

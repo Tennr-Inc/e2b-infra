@@ -620,7 +620,8 @@ ALB or a public endpoint.
   a deliberate density tradeoff, not a guarantee against fragmentation. Admission accounting
   does not change lazy page loading or create kernel hugepage reservations. A conservative
   fallback is 24576 MiB and six slots, which fits the current persistent pool with headroom.
-  A systemd timer publishes `E2B/Capacity/SandboxCapacityUtilization` every minute. It takes the
+  A systemd calendar timer publishes `E2B/Capacity/SandboxCapacityUtilization` on
+  clock minutes, avoiding cumulative drift from relative timers. It takes the
   maximum of committed RAM / RAM limit, committed slots / slot limit, used-plus-reserved
   hugepages / (persistent pool minus 2 GiB), and physical memory pressure excluding unused,
   unreserved pool pages. Thus six idle 4 GiB guests already report at least 75%, even with no
@@ -632,6 +633,34 @@ ALB or a public endpoint.
   `client_cluster_size` / `client_max_cluster_size` bounds (1–20 by default). Policies only scale
   out, and new nodes have scale-in protection: removing a node requires draining its sandboxes
   first. New nodes join Nomad and receive the orchestrator system job automatically.
+  The optional safe scale-in controller (`CLIENT_SAFE_SCALE_IN_ENABLED`, initially
+  dry-run) runs as a serialized Lambda on an EventBridge schedule. It keeps one
+  retirement intent in DynamoDB and uses a fixed SSM document to access the host's
+  loopback-only `/retirement` endpoint. Capacity admission and the drain fence share
+  a lock. A journal on `/orchestrator` records each snapshot before creation and
+  clears it only after successful upload; failed uploads and unverified legacy
+  history block removal. The controller waits for natural completion, cancels an
+  unsealed drain if demand returns, and requires a persistent sealed admission
+  fence plus zero commitments and zero pending uploads before terminating the
+  specific EC2 instance with desired-capacity decrement. A 35-minute cooldown
+  after confirmed removal clears historical averages from the larger fleet
+  before another candidate can be selected. Native ASG scale-in and
+  protection remain unchanged. Fresh NVMe initialization can establish verified
+  history through the separate, default-off `CLIENT_RETIREMENT_HISTORY_ENABLED`
+  bootstrap flag after journal-capable jobs are deployed. During rollout, explicit
+  `CLIENT_RETIREMENT_NODE_IDS` move audited, empty nodes to a separate immutable
+  orchestrator job; the original job excludes those IDs and keeps its current
+  artifact on occupied workers. After all legacy allocations have moved,
+  `CLIENT_ORCHESTRATOR_ARTIFACT_KEY` promotes the same immutable binary for fresh
+  workers before fresh-history initialization is enabled. Alternatively,
+  `CLIENT_RETIREMENT_NODE_POOL` registers a separate immutable job and sends only
+  future ASG instances to that pool, so long-running legacy sessions can finish
+  without delaying guarded scale-out. The launch template depends on that job's
+  registration; API service discovery spans both pools. Nomad services reference
+  their named network ports, so registrations include the allocated host address.
+  Numeric service ports can produce an empty address and must not be used here.
+  Existing hosts require a durability audit. See
+  [the scale-in runbook](aws-safe-scale-in.md) for rollout and recovery.
   Roll out the admission-capable orchestrator with the new bootstrap/reporter and metric policy
   on fresh workers; an older binary has no `/capacity` endpoint. Validate concurrent starts,
   full-memory workloads, pause/resume, and checkpoints before draining old workers. Do not

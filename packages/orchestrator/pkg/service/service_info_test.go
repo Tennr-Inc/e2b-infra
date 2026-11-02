@@ -26,3 +26,13 @@ func TestServiceStatusOverrideRejectsDrainingToStandby(t *testing.T) {
 	require.Equal(t, codes.FailedPrecondition, status.Code(err))
 	require.Equal(t, orchestratorinfo.ServiceInfoStatus_Draining, info.GetStatus().Status)
 }
+
+func TestRetirementStatusDoesNotReviveDrainingOrUnhealthy(t *testing.T) {
+	for _, original := range []orchestratorinfo.ServiceInfoStatus{orchestratorinfo.ServiceInfoStatus_Draining, orchestratorinfo.ServiceInfoStatus_Unhealthy} {
+		info := &ServiceInfo{}
+		info.SetStatus(t.Context(), original)
+		info.RetirementStatus(t.Context(), false)
+		info.RetirementStatus(t.Context(), true)
+		require.Equal(t, original, info.GetStatus().Status)
+	}
+}

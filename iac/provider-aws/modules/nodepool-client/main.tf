@@ -8,8 +8,9 @@ locals {
       "install -d -m 0755 /opt/e2b/bin",
       "touch /opt/e2b/instance-store-required",
       "aws s3 cp s3://${var.setup_bucket_name}/${aws_s3_object.instance_store_setup[0].key} /opt/e2b/bin/instance-store.py",
-      "python3 /opt/e2b/bin/instance-store.py",
+      "python3 /opt/e2b/bin/instance-store.py${var.retirement_history_enabled ? " --retirement-journal" : ""}",
     ]) : ""
+    SSM_SETUP                    = var.safe_scale_in_enabled ? file("${path.module}/scripts/install-ssm.sh") : ""
     NODE_POOL                    = var.node_pool_name
     CLUSTER_TAG_NAME             = var.cluster_tag_name
     CLUSTER_TAG_VALUE            = var.cluster_tag_value
@@ -229,4 +230,10 @@ resource "aws_autoscaling_group" "client" {
   lifecycle {
     ignore_changes = [desired_capacity]
   }
+}
+
+resource "aws_iam_role_policy_attachment" "retirement_ssm" {
+  count      = var.safe_scale_in_enabled ? 1 : 0
+  role       = aws_iam_role.client.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }

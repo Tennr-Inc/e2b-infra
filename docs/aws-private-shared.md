@@ -1096,6 +1096,11 @@ registration, and template loading; scaling cannot rescue a request that already
 capacity. Keep extra minimum capacity for sudden bursts.
 
 Both policies disable automatic scale-in. Newly launched nodes are protected from scale-in.
+Optional automatic removal uses the separate [safe scale-in controller](aws-safe-scale-in.md),
+which retains those protections and terminates only a specifically sealed, empty,
+durability-verified host. It is disabled by default and starts in dry-run when enabled;
+existing hosts are never automatically assumed safe merely because they are empty.
+
 For manual removal, first prevent placement and drain running sandboxes, then verify all snapshot
 uploads have succeeded in S3 before removing protection and lowering desired capacity. Stopping
 an orchestrator or reducing capacity without this process can discard active work. The orchestrator

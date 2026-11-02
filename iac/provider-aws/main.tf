@@ -10,6 +10,11 @@ terraform {
       version = "2.1.0"
     }
 
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.7"
+    }
+
     random = {
       source  = "hashicorp/random"
       version = "~> 3.1"
@@ -274,7 +279,9 @@ module "postgres" {
 }
 
 module "cluster" {
-  source = "./nomad-cluster"
+  client_safe_scale_in_enabled      = var.client_safe_scale_in_enabled
+  client_retirement_history_enabled = var.client_retirement_history_enabled
+  source                            = "./nomad-cluster"
 
   prefix          = var.prefix
   aws_account_id  = data.aws_caller_identity.current.account_id
@@ -326,7 +333,7 @@ module "cluster" {
   build_security_group_ids           = [aws_security_group.cluster_node.id]
   build_node_labels                  = var.build_node_labels
 
-  client_node_pool_name               = local.client_pool_name
+  client_node_pool_name               = var.client_retirement_node_pool != "" ? module.nomad.retirement_node_pool_name : local.client_pool_name
   client_cluster_size                 = var.client_cluster_size
   client_max_cluster_size             = var.client_max_cluster_size
   client_reserved_host_memory_mib     = var.client_reserved_host_memory_mib
@@ -385,6 +392,10 @@ module "nomad" {
   client_proxy_repository_name = module.init.client_proxy_repository_name
   client_proxy_env_vars        = local.client_proxy_env_vars
 
+  client_retirement_node_pool         = var.client_retirement_node_pool
+  client_orchestrator_artifact_key    = var.client_orchestrator_artifact_key
+  client_retirement_node_ids          = var.client_retirement_node_ids
+  client_retirement_artifact_key      = var.client_retirement_artifact_key
   orchestrator_node_pool              = local.client_pool_name
   orchestrator_port                   = var.orchestrator_port
   orchestrator_proxy_port             = var.orchestrator_proxy_port
@@ -480,4 +491,14 @@ resource "aws_security_group" "cluster_node" {
   tags = {
     Name = "${var.prefix}cluster-node"
   }
+}
+
+module "safe_scale_in" {
+  count         = var.client_safe_scale_in_enabled ? 1 : 0
+  source        = "./modules/safe-scale-in"
+  name          = "${var.prefix}safe-scale-in"
+  asg_name      = module.cluster.sandbox_asg_name
+  asg_arn       = module.cluster.sandbox_asg_arn
+  minimum_nodes = var.client_scale_in_minimum_nodes
+  dry_run       = var.client_scale_in_dry_run
 }

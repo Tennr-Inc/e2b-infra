@@ -9,7 +9,9 @@ locals {
     port       = var.port
     proxy_port = var.proxy_port
 
-    artifact_source = var.artifact_source
+    artifact_source   = var.artifact_source
+    included_node_ids = var.included_node_ids
+    excluded_node_ids = var.excluded_node_ids
 
     job_env_vars               = local.job_env_vars
     version_constraint_enabled = var.version_constraint_enabled
@@ -40,7 +42,7 @@ locals {
 }
 
 resource "nomad_variable" "orchestrator_hash" {
-  path = "nomad/jobs"
+  path = var.job_variable_path
   items = {
     latest_orchestrator_job_id = local.latest_orchestrator_job_id
   }

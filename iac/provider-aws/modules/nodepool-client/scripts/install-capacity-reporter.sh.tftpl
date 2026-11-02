@@ -23,8 +23,10 @@ cat > /etc/systemd/system/e2b-capacity.timer <<'UNIT'
 Description=Sample E2B sandbox memory capacity every minute
 
 [Timer]
-OnBootSec=60s
-OnUnitActiveSec=60s
+# Relative timers accumulate scheduling slack (observed at ~61 seconds),
+# leaving incomplete five-minute buckets despite healthy workers. Align to
+# clock minutes so scale-in can require one sample per worker per minute.
+OnCalendar=*-*-* *:*:00
 AccuracySec=1s
 
 [Install]

@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 
+	"github.com/e2b-dev/infra/packages/orchestrator/pkg/capacity"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/cfg"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/events"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/proxy"
@@ -64,6 +65,7 @@ type Server struct {
 	orchestrator.UnimplementedSandboxServiceServer
 	orchestrator.UnimplementedChunkServiceServer
 
+	capacity                 *capacity.Tracker
 	config                   cfg.Config
 	sandboxFactory           *sandbox.Factory
 	info                     *service.ServiceInfo
@@ -100,6 +102,7 @@ type Server struct {
 }
 
 type ServiceConfig struct {
+	Capacity         *capacity.Tracker
 	Config           cfg.Config
 	Tel              *telemetry.Client
 	NetworkPool      network.PoolInterface
@@ -129,6 +132,7 @@ func New(ctx context.Context, cfg ServiceConfig) (*Server, error) {
 
 	server := &Server{
 		config:            cfg.Config,
+		capacity:          cfg.Capacity,
 		sandboxFactory:    cfg.SandboxFactory,
 		info:              cfg.Info,
 		proxy:             cfg.Proxy,

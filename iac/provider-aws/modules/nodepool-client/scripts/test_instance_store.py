@@ -36,10 +36,10 @@ class InstanceStoreTests(unittest.TestCase):
             return self.disk["name"]
         return ""
 
-    def prepare(self, mounted=False):
+    def prepare(self, mounted=False, retirement=False):
         with patch.object(store, "run", side_effect=self.command), patch.object(
                 store.subprocess, "run", return_value=subprocess.CompletedProcess([], 0 if mounted else 1)):
-            store.prepare(self.target)
+            store.prepare(self.target, retirement_journal=retirement)
 
     def test_blank_local_disk_is_formatted_and_ebs_is_untouched(self):
         self.prepare()
@@ -60,6 +60,21 @@ class InstanceStoreTests(unittest.TestCase):
         self.prepare(mounted=True)
         self.assertEqual(marker.read_text(), "keep")
         self.assertNotIn("mount", [call[0] for call in self.calls])
+
+    def test_only_fresh_disk_can_initialize_verified_retirement_history(self):
+        self.prepare(retirement=True)
+        journal = self.target / "retirement.json"
+        self.assertTrue(json.loads(journal.read_text())["verified"])
+        journal.write_text('{"verified":false,"pending":{"unfinished":true}}')
+        self.disk.update(fstype="xfs", label="e2b-cache", mountpoints=[str(self.target)])
+        self.prepare(mounted=True, retirement=True)
+        self.assertEqual(json.loads(journal.read_text()),
+                         {"verified": False, "pending": {"unfinished": True}})
+
+    def test_existing_disk_without_history_is_not_auto_enrolled(self):
+        self.disk.update(fstype="xfs", label="e2b-cache")
+        self.prepare(retirement=True)
+        self.assertFalse((self.target / "retirement.json").exists())
 
     def test_missing_or_ambiguous_local_disks_are_rejected(self):
         for disks in ([self.ebs], [self.disk, self.disk]):

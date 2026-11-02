@@ -6,6 +6,7 @@ On reboot retain the existing XFS filesystem. After stop/start EC2 supplies a
 blank instance-store device; durable snapshots must already be in S3.
 """
 
+import argparse
 import json
 import os
 from pathlib import Path
@@ -33,7 +34,8 @@ def select_disk(disks):
     return disk
 
 
-def prepare(target=TARGET):
+def prepare(target=TARGET, retirement_journal=False):
+    formatted = False
     disks = json.loads(run("lsblk", "--json", "--paths", "--output",
                            "NAME,MODEL,TYPE,FSTYPE,LABEL,MOUNTPOINTS"))["blockdevices"]
     disk = select_disk(disks)
@@ -60,6 +62,7 @@ def prepare(target=TARGET):
                 raise RuntimeError("Disk has existing signatures; refusing to format it")
             # No -f: even after the checks, mkfs must refuse an occupied disk.
             run("mkfs.xfs", "-m", "reflink=1", "-L", LABEL, device)
+            formatted = True
         elif disk["fstype"] != "xfs" or disk.get("label") != LABEL:
             raise RuntimeError("Foreign instance-store filesystem; refusing to overwrite it")
 
@@ -69,8 +72,24 @@ def prepare(target=TARGET):
         raise RuntimeError("Orchestrator cache requires XFS reflink support")
     for name in ("sandbox", "template", "build"):
         (target / name).mkdir(exist_ok=True)
+    # Only a newly formatted disk has provably no pre-journal snapshots.
+    # Never infer this from an empty cache or upgrade an existing node here.
+    if retirement_journal and formatted:
+        journal = target / "retirement.json"
+        with journal.open("x") as handle:
+            os.chmod(journal, 0o600)
+            json.dump({"version": 1, "verified": True, "mode": "active", "pending": {}}, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        descriptor = os.open(target, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
     print(f"Orchestrator cache ready: {device} at {target}, XFS with reflink")
 
 
 if __name__ == "__main__":
-    prepare()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--retirement-journal", action="store_true")
+    prepare(retirement_journal=parser.parse_args().retirement_journal)
