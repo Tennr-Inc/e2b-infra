@@ -309,3 +309,18 @@ variable "launch_darkly_api_key" {
 variable "traefik_config_files" {
   type = map(string)
 }
+
+variable "client_retirement_node_ids" {
+  description = "Audited, empty Nomad node IDs moved to the immutable journal-capable job. Enroll one node at a time."
+  type        = set(string)
+  default     = []
+  validation {
+    condition     = alltrue([for id in var.client_retirement_node_ids : can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", id))])
+    error_message = "Retirement rollout requires exact Nomad node UUIDs."
+  }
+}
+variable "client_retirement_artifact_key" {
+  description = "Immutable S3 key of the validated journal-capable orchestrator. Required for enrolled nodes."
+  type        = string
+  default     = ""
+}

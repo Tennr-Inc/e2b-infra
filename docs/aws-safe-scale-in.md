@@ -44,6 +44,7 @@ The implementation is opt-in:
 
 ```sh
 CLIENT_SAFE_SCALE_IN_ENABLED=true
+CLIENT_RETIREMENT_HISTORY_ENABLED=false
 CLIENT_SCALE_IN_DRY_RUN=true
 CLIENT_SCALE_IN_MINIMUM_NODES=2
 ```
@@ -53,7 +54,10 @@ default. Both the normal Terraform configuration and the Makefile forward these
 settings. Native ASG protection stays enabled even after dry-run is disabled.
 
 Deploy and test the journal-capable orchestrator **before** enabling fresh-node
-journal initialization in the launch template. Do not roll the entire live fleet
+journal initialization in the launch template. The separate
+`CLIENT_RETIREMENT_HISTORY_ENABLED` flag defaults to false, so deploying SSM and
+the controller cannot accidentally verify a fresh node running an older binary.
+Enable it only once the jobs eligible for new workers all honor the journal. Do not roll the entire live fleet
 by replacing its shared artifact or restarting all allocations. Validate a new
 isolated node first, including live commands through drain/cancel, refused
 create/resume after fencing, pending upload refusal, and restart persistence.
@@ -64,6 +68,17 @@ instance permissions. The controller's own role can invoke only the retirement
 SSM document on the designated worker Name tag; it cannot run arbitrary shell
 commands. Its termination permission is scoped to the sandbox ASG. Installing
 SSM on an existing worker does not require restarting its orchestrator.
+
+For the existing AWS pool, `CLIENT_RETIREMENT_NODE_IDS` selects exact Nomad node
+UUIDs for a separate `orchestrator-<environment>-retirement` job. The original
+job excludes those nodes while retaining its artifact on every other worker.
+`CLIENT_RETIREMENT_ARTIFACT_KEY` must identify the immutable, validated S3 binary.
+Add a node only after standby has propagated, its natural drain is complete,
+and its legacy cache and snapshot dependencies have passed the durability audit.
+Review the Nomad plan: only that node may have a destructive allocation update.
+Keep these settings in the deployment environment so later applies retain the
+split. New workers continue using the original job until the runtime rollout is
+complete; leave fresh-history initialization off during this mixed phase.
 
 Observe a candidate in dry-run, review actual capacity and snapshot obligations,
 then set `CLIENT_SCALE_IN_DRY_RUN=false`. Retire one verified host and validate
@@ -124,3 +139,32 @@ load-triggered cancellation, unsupported history, and the capacity floor. Mocked
 Terraform tests verify native scale-in and protection stay unchanged with the
 controller enabled. Real AWS/SSM and sandbox pause/resume validation are separate
 rollout requirements; passing unit tests does not establish those live results.
+
+
+## Production-account canary: 2026-11-02
+
+The isolated canary used the production AMI, `m8id.4xlarge`, the production
+artifact buckets, and a separate Nomad pool with no API service registration.
+The validated orchestrator SHA-256 was
+`a271fd7f28cdf9fe68254be00b0b2a4226aa3fa71e4747341324f291a96f027e`.
+
+Observed results:
+
+- An existing 20-second command completed through drain. New sandbox admission
+  returned `ResourceExhausted`, and sealing an occupied node returned HTTP 409.
+- Cancelling an unsealed drain restored admission. A sealed fence survived a
+  process restart and refused cancellation with HTTP 409.
+- After pause released the VM, a pending snapshot upload still blocked sealing
+  with HTTP 409. The journal cleared only when upload completed.
+- After terminating the original host, a fresh host resumed the uploaded snapshot.
+  A 128 MiB random file retained its SHA-256, the marker and counter survived,
+  and a pre-pause background process resumed advancing its heartbeat.
+- The first boot exposed a preinstalled Snap SSM agent conflicting with Debian
+  installation. The installer now reuses either existing service. A second fresh
+  host completed cloud-init with the corrected installer.
+
+Both temporary canary instances were terminated and the isolated runtime job was
+removed after their journals reported sealed, empty, and fully uploaded. The
+controller was deployed with `DRY_RUN=true`; the production ASG remained at ten
+protected workers. Live retirement of a production worker is a separate rollout
+step and is not established by these canary results.

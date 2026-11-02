@@ -522,3 +522,24 @@ variable "client_scale_in_minimum_nodes" {
   type        = number
   default     = 2
 }
+
+variable "client_retirement_history_enabled" {
+  description = "Initialize verified history only on newly formatted NVMe; enable only after every eligible job uses a journal-capable binary."
+  type        = bool
+  default     = false
+}
+
+variable "client_retirement_node_ids" {
+  description = "Audited, empty Nomad node IDs moved to the immutable journal-capable job. Enroll one node at a time."
+  type        = set(string)
+  default     = []
+  validation {
+    condition     = alltrue([for id in var.client_retirement_node_ids : can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", id))])
+    error_message = "Retirement rollout requires exact Nomad node UUIDs."
+  }
+}
+variable "client_retirement_artifact_key" {
+  description = "Immutable S3 key of the validated journal-capable orchestrator. Required for enrolled nodes."
+  type        = string
+  default     = ""
+}

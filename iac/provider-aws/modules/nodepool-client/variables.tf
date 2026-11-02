@@ -194,5 +194,11 @@ variable "use_instance_store" {
 variable "safe_scale_in_enabled" {
   type        = bool
   default     = false
-  description = "Install SSM and initialize retirement history on fresh NVMe only; deploy journal-capable binaries first."
+  description = "Install SSM and grant managed-instance permissions for the retirement controller."
+}
+
+variable "retirement_history_enabled" {
+  description = "Initialize verified history only on newly formatted NVMe; enable only after every eligible job uses a journal-capable binary."
+  type        = bool
+  default     = false
 }

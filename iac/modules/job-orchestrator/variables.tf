@@ -35,3 +35,19 @@ variable "job_env_vars" {
   default   = {}
   sensitive = true
 }
+
+variable "included_node_ids" {
+  description = "When nonempty, run only on these exact Nomad nodes."
+  type        = set(string)
+  default     = []
+}
+variable "excluded_node_ids" {
+  description = "Nodes served by a separate, explicitly enrolled runtime job."
+  type        = set(string)
+  default     = []
+}
+variable "job_variable_path" {
+  description = "Independent version pointer for separately managed runtime jobs."
+  type        = string
+  default     = "nomad/jobs"
+}

@@ -643,7 +643,12 @@ ALB or a public endpoint.
   fence plus zero commitments and zero pending uploads before terminating the
   specific EC2 instance with desired-capacity decrement. Native ASG scale-in and
   protection remain unchanged. Fresh NVMe initialization can establish verified
-  history; existing hosts require a durability audit. See
+  history through the separate, default-off `CLIENT_RETIREMENT_HISTORY_ENABLED`
+  bootstrap flag after journal-capable jobs are deployed. During rollout, explicit
+  `CLIENT_RETIREMENT_NODE_IDS` move audited, empty nodes to a separate immutable
+  orchestrator job; the original job excludes those IDs and keeps its current
+  artifact on occupied workers. Existing hosts require
+  a durability audit. See
   [the scale-in runbook](aws-safe-scale-in.md) for rollout and recovery.
   Roll out the admission-capable orchestrator with the new bootstrap/reporter and metric policy
   on fresh workers; an older binary has no `/capacity` endpoint. Validate concurrent starts,

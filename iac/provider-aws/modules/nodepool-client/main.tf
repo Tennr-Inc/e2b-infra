@@ -8,7 +8,7 @@ locals {
       "install -d -m 0755 /opt/e2b/bin",
       "touch /opt/e2b/instance-store-required",
       "aws s3 cp s3://${var.setup_bucket_name}/${aws_s3_object.instance_store_setup[0].key} /opt/e2b/bin/instance-store.py",
-      "python3 /opt/e2b/bin/instance-store.py${var.safe_scale_in_enabled ? " --retirement-journal" : ""}",
+      "python3 /opt/e2b/bin/instance-store.py${var.retirement_history_enabled ? " --retirement-journal" : ""}",
     ]) : ""
     SSM_SETUP                    = var.safe_scale_in_enabled ? file("${path.module}/scripts/install-ssm.sh") : ""
     NODE_POOL                    = var.node_pool_name

@@ -279,8 +279,9 @@ module "postgres" {
 }
 
 module "cluster" {
-  client_safe_scale_in_enabled = var.client_safe_scale_in_enabled
-  source                       = "./nomad-cluster"
+  client_safe_scale_in_enabled      = var.client_safe_scale_in_enabled
+  client_retirement_history_enabled = var.client_retirement_history_enabled
+  source                            = "./nomad-cluster"
 
   prefix          = var.prefix
   aws_account_id  = data.aws_caller_identity.current.account_id
@@ -391,6 +392,8 @@ module "nomad" {
   client_proxy_repository_name = module.init.client_proxy_repository_name
   client_proxy_env_vars        = local.client_proxy_env_vars
 
+  client_retirement_node_ids          = var.client_retirement_node_ids
+  client_retirement_artifact_key      = var.client_retirement_artifact_key
   orchestrator_node_pool              = local.client_pool_name
   orchestrator_port                   = var.orchestrator_port
   orchestrator_proxy_port             = var.orchestrator_proxy_port

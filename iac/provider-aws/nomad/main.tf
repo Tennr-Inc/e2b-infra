@@ -139,6 +139,8 @@ module "orchestrator" {
   orchestrator_checksum = data.aws_s3_object.orchestrator.etag
   job_env_vars          = var.orchestrator_env_vars
 
+  excluded_node_ids = var.client_retirement_node_ids
+
   # AWS Nomad clients do not publish orchestrator_job_version metadata.
   # Replace the prior system job instead of constraining placement by version.
   version_constraint_enabled = false
@@ -242,4 +244,32 @@ module "clickhouse" {
   backup_bucket = var.clickhouse_backups_bucket_name
 
   clickhouse_migrator_image = data.aws_ecr_image.clickhouse_migrator.image_uri
+}
+
+# Keep the old artifact on occupied hosts. Only audited, empty nodes are
+# explicitly moved to this job; an artifact change cannot restart the fleet.
+data "aws_s3_object" "retirement_orchestrator" {
+  count  = length(var.client_retirement_node_ids) > 0 ? 1 : 0
+  bucket = var.fc_env_pipeline_bucket_name
+  key    = var.client_retirement_artifact_key
+  lifecycle {
+    precondition {
+      condition     = var.client_retirement_artifact_key != "" && var.client_retirement_artifact_key != "orchestrator"
+      error_message = "Enrolled nodes require a versioned artifact key, never the mutable default binary."
+    }
+  }
+}
+module "retirement_orchestrator" {
+  count                      = length(var.client_retirement_node_ids) > 0 ? 1 : 0
+  source                     = "../../modules/job-orchestrator"
+  node_pool                  = var.orchestrator_node_pool
+  port                       = var.orchestrator_port
+  proxy_port                 = var.orchestrator_proxy_port
+  environment                = "${var.environment}-retirement"
+  artifact_source            = "s3::https://${var.fc_env_pipeline_bucket_name}.s3.${var.aws_region}.amazonaws.com/${var.client_retirement_artifact_key}?etag=${data.aws_s3_object.retirement_orchestrator[0].etag}"
+  orchestrator_checksum      = data.aws_s3_object.retirement_orchestrator[0].etag
+  job_env_vars               = var.orchestrator_env_vars
+  version_constraint_enabled = false
+  included_node_ids          = var.client_retirement_node_ids
+  job_variable_path          = "nomad/jobs/orchestrator-${var.environment}-retirement"
 }

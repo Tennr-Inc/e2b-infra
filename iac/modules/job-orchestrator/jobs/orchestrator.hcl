@@ -24,6 +24,21 @@ job "orchestrator-${latest_orchestrator_job_id}" {
     }
 %{ endif }
 
+%{ if length(included_node_ids) > 0 }
+    constraint {
+      attribute = "$${node.unique.id}"
+      operator  = "regexp"
+      value     = "^(${join("|", sort(tolist(included_node_ids)))})$"
+    }
+%{ endif }
+%{ for id in sort(tolist(excluded_node_ids)) }
+    constraint {
+      attribute = "$${node.unique.id}"
+      operator  = "!="
+      value     = "${id}"
+    }
+%{ endfor }
+
     service {
       name = "orchestrator"
       port = "${port}"

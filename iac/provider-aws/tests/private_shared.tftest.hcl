@@ -366,3 +366,25 @@ run "safe_scale_in_keeps_native_termination_disabled" {
     error_message = "Native ASG scale-in must remain unable to select arbitrary live hosts."
   }
 }
+
+run "retirement_history_requires_separate_opt_in" {
+  command = plan
+  variables {
+    client_safe_scale_in_enabled = true
+  }
+  assert {
+    condition     = !module.cluster.sandbox_capacity.retirement_history_enabled
+    error_message = "Deploying the controller must not verify disks that may run an older orchestrator."
+  }
+}
+run "retirement_history_can_follow_runtime_rollout" {
+  command = plan
+  variables {
+    client_safe_scale_in_enabled      = true
+    client_retirement_history_enabled = true
+  }
+  assert {
+    condition     = module.cluster.sandbox_capacity.retirement_history_enabled && !module.cluster.build_capacity.retirement_history_enabled
+    error_message = "Explicit enrollment must affect only the sandbox pool."
+  }
+}
