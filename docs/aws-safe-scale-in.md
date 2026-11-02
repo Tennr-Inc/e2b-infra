@@ -209,10 +209,9 @@ as a historical failure with no host-owned artifacts; it was not marked uploaded
 and no database records were changed. Failed builds are not generally exempt
 from auditing.
 
-The controller is active with a temporary minimum of nine workers. A production
-retirement has not yet been observed. Missing capacity samples during manual
-standby correctly block selection; the quiet-window requirement has not been
-bypassed. During migration, reduced available capacity triggered native scale-out
+Initial staging used a temporary minimum of nine workers pending a successful
+production retirement. Missing capacity samples during manual standby correctly
+blocked selection; the quiet-window requirement was not bypassed. During migration, reduced available capacity triggered native scale-out
 from ten to seventeen workers. The remaining manual drains were cancelled,
 restoring admission without interrupting their existing sessions.
 
@@ -253,5 +252,32 @@ about every 61 seconds: four otherwise healthy workers each contributed only fou
 samples to one five-minute bucket. The publisher now uses a clock-minute calendar
 timer on current and future workers. Only the reporting timers were restarted;
 no runtime or sandbox was restarted, and the completeness threshold was retained.
-The temporary nine-node floor remains until a successful production retirement
-has been observed. The first attempt validated drain/cancel, not termination.
+The nine-node floor was retained for the pilot. This first attempt validated
+drain/cancel, not termination; the successful retirement is recorded below.
+
+
+## Completed production retirement: 2026-11-02
+
+At 21:27 UTC the scheduled controller requested termination of
+`i-0a752dac75e2deab7`. AWS subsequently reported the instance terminated and the
+scaling activity successful. Desired and actual fleet size fell from seventeen
+to sixteen. The persisted SSM proof was `sealed`, `verified: true`, `ready: true`,
+with zero sandbox/RAM commitments, zero pending uploads, and no journal error.
+A separate audit confirmed all four snapshots originating on that worker were
+durable in S3. No running sandbox was stopped for this retirement.
+
+Before that removal, all twenty-two completed snapshots originating on the fresh
+pool had also passed the S3 header/dependency audit. After the timer correction,
+five consecutive clock minutes each contained all seventeen expected samples.
+The controller's first scheduled attempt had already validated safe drain
+cancellation while preserving its active sandbox.
+
+After confirming the instance was terminated, the ASG contained sixteen healthy,
+protected workers, and the controller had persisted its 35-minute cooldown, the
+production floor was lowered from nine to two. Dry-run remains off. Eleven
+surviving workers have verified journals; five legacy workers remain protected
+and ineligible until their natural drain and durability audit can be completed.
+Future workers automatically join the guarded pool. The configured two-node floor
+does not authorize removing those legacy workers or bypassing demand checks.
+
+The metadata-only [completed rollout audit](https://s3.console.aws.amazon.com/s3/object/e2b-shared-093337158068-fc-env-pipeline?region=us-east-1&prefix=safe-scale-in%2Faudits%2F2026-11-02%2F62c696f203388705cdd7db9d043f77a5a750e1c840e67657de6cf101bde3add9.json) preserves the seal proof, enrollment counts, snapshot audits, and final fleet checks in the private production artifact bucket.
