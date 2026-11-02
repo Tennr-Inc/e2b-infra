@@ -80,9 +80,17 @@ Add a node only after standby has propagated, its natural drain is complete,
 and its legacy cache and snapshot dependencies have passed the durability audit.
 Review the Nomad plan: only that node may have a destructive allocation update.
 Keep these settings in the deployment environment so later applies retain the
-split. New workers continue using the original job until the runtime rollout is
-complete; leave fresh-history initialization off during this mixed phase.
-Once every legacy allocation has moved, set `CLIENT_ORCHESTRATOR_ARTIFACT_KEY`
+split. Without a separate fresh-worker pool, new workers continue using the
+original job; leave fresh-history initialization off while that job uses the old
+binary. If long-running legacy sessions remain, set `CLIENT_RETIREMENT_NODE_POOL` to a
+new pool such as `retirement-ready`. Terraform registers the immutable fresh-worker
+job before updating the ASG launch template. Only future instances join that
+pool; existing allocations stay in place. Once this job is registered, fresh-disk
+history initialization can be enabled without trusting legacy binaries. API
+service discovery spans both pools. Continue auditing and migrating old workers
+as they empty; a busy legacy host remains protected indefinitely.
+
+Alternatively, once every legacy allocation has moved, set `CLIENT_ORCHESTRATOR_ARTIFACT_KEY`
 to the same immutable key. The original job then serves fresh workers with the
 validated runtime, while enrolled nodes keep their separate job. Verify the
 scheduler plan has no destructive allocation updates before applying this
@@ -177,3 +185,31 @@ removed after their journals reported sealed, empty, and fully uploaded. The
 controller was deployed with `DRY_RUN=true`; the production ASG remained at ten
 protected workers. Live retirement of a production worker is a separate rollout
 step and is not established by these canary results.
+
+
+## Staged production rollout: 2026-11-02
+
+After the canary, four existing workers were enrolled individually. Each was
+first put in standby and allowed to finish its sandboxes. While the old process
+was still available, the operator audited cached and node-origin snapshot builds,
+including inherited rootfs/memory dependencies, against S3. Only then was the
+empty worker stopped, its verified journal initialized, and its runtime replaced.
+Nomad plans showed one old allocation removed and one new allocation placed,
+without restarting previously enrolled workers. Seven snapshots produced by the
+first enrolled production worker also passed the durability audit.
+
+One pre-existing failed build had no artifacts in S3, its local directory, open
+file descriptors, or the old process's peer-cache API. It was explicitly recorded
+as a historical failure with no host-owned artifacts; it was not marked uploaded,
+and no database records were changed. Failed builds are not generally exempt
+from auditing.
+
+The controller is active with a temporary minimum of nine workers, allowing only
+one initial retirement from the ten-worker fleet. A production retirement has
+not yet been observed. Missing capacity samples during manual standby correctly
+block selection; the quiet-window requirement has not been bypassed.
+
+The launch template now directs future workers to `retirement-ready`, with a
+separate job using the same immutable runtime and fresh-disk journal initialization.
+Existing instances were not replaced. Busy legacy workers retain their original
+runtime and scale-in protection until they can be audited safely.

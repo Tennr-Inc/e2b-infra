@@ -334,3 +334,13 @@ variable "client_orchestrator_artifact_key" {
     error_message = "The default orchestrator artifact key must not be empty."
   }
 }
+
+variable "client_retirement_node_pool" {
+  description = "Optional separate pool for fresh journal-capable workers, leaving occupied legacy workers in their original pool."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.client_retirement_node_pool == "" || (can(regex("^[a-z][a-z0-9-]*$", var.client_retirement_node_pool)) && !contains(["default", "all", "api", "build", "clickhouse"], var.client_retirement_node_pool))
+    error_message = "Choose a distinct lowercase worker pool name, or leave it empty."
+  }
+}

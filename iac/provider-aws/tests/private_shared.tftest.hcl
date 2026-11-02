@@ -388,3 +388,22 @@ run "retirement_history_can_follow_runtime_rollout" {
     error_message = "Explicit enrollment must affect only the sandbox pool."
   }
 }
+
+run "fresh_retirement_pool_leaves_legacy_workers_in_place" {
+  command = plan
+  variables {
+    client_safe_scale_in_enabled      = true
+    client_retirement_node_pool       = "retirement-ready"
+    client_retirement_artifact_key    = "releases/verified-sha/orchestrator"
+    client_retirement_history_enabled = true
+    client_retirement_node_ids        = []
+  }
+  assert {
+    condition     = module.cluster.sandbox_capacity.node_pool == "retirement-ready" && module.cluster.sandbox_capacity.retirement_history_enabled
+    error_message = "Future workers must join the registered guarded pool with fresh-history initialization."
+  }
+  assert {
+    condition     = module.cluster.sandbox_capacity.scale_in_protection && module.cluster.sandbox_capacity.cpu_scale_in_disabled && module.cluster.sandbox_capacity.memory_scale_in_disabled
+    error_message = "A new worker pool must not enable arbitrary ASG termination."
+  }
+}

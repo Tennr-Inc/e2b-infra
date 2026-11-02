@@ -333,7 +333,7 @@ module "cluster" {
   build_security_group_ids           = [aws_security_group.cluster_node.id]
   build_node_labels                  = var.build_node_labels
 
-  client_node_pool_name               = local.client_pool_name
+  client_node_pool_name               = var.client_retirement_node_pool != "" ? module.nomad.retirement_node_pool_name : local.client_pool_name
   client_cluster_size                 = var.client_cluster_size
   client_max_cluster_size             = var.client_max_cluster_size
   client_reserved_host_memory_mib     = var.client_reserved_host_memory_mib
@@ -392,6 +392,7 @@ module "nomad" {
   client_proxy_repository_name = module.init.client_proxy_repository_name
   client_proxy_env_vars        = local.client_proxy_env_vars
 
+  client_retirement_node_pool         = var.client_retirement_node_pool
   client_orchestrator_artifact_key    = var.client_orchestrator_artifact_key
   client_retirement_node_ids          = var.client_retirement_node_ids
   client_retirement_artifact_key      = var.client_retirement_artifact_key

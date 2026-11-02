@@ -651,7 +651,11 @@ ALB or a public endpoint.
   orchestrator job; the original job excludes those IDs and keeps its current
   artifact on occupied workers. After all legacy allocations have moved,
   `CLIENT_ORCHESTRATOR_ARTIFACT_KEY` promotes the same immutable binary for fresh
-  workers before fresh-history initialization is enabled. Existing hosts require
+  workers before fresh-history initialization is enabled. Alternatively,
+  `CLIENT_RETIREMENT_NODE_POOL` registers a separate immutable job and sends only
+  future ASG instances to that pool, so long-running legacy sessions can finish
+  without delaying guarded scale-out. The launch template depends on that job's
+  registration; API service discovery spans both pools. Existing hosts require
   a durability audit. See
   [the scale-in runbook](aws-safe-scale-in.md) for rollout and recovery.
   Roll out the admission-capable orchestrator with the new bootstrap/reporter and metric policy

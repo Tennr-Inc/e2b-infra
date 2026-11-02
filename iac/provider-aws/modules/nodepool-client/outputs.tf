@@ -1,6 +1,7 @@
 output "capacity_configuration" {
   description = "Sandbox capacity bounds and automatic scale-out policy."
   value = {
+    node_pool                  = var.node_pool_name
     instance_type              = aws_launch_template.client.instance_type
     instance_store_cache       = var.use_instance_store
     retirement_history_enabled = var.retirement_history_enabled

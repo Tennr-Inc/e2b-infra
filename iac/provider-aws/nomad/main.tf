@@ -249,7 +249,7 @@ module "clickhouse" {
 # Keep the old artifact on occupied hosts. Only audited, empty nodes are
 # explicitly moved to this job; an artifact change cannot restart the fleet.
 data "aws_s3_object" "retirement_orchestrator" {
-  count  = length(var.client_retirement_node_ids) > 0 ? 1 : 0
+  count  = length(var.client_retirement_node_ids) > 0 || var.client_retirement_node_pool != "" ? 1 : 0
   bucket = var.fc_env_pipeline_bucket_name
   key    = var.client_retirement_artifact_key
   lifecycle {
@@ -272,4 +272,31 @@ module "retirement_orchestrator" {
   version_constraint_enabled = false
   included_node_ids          = var.client_retirement_node_ids
   job_variable_path          = "nomad/jobs/orchestrator-${var.environment}-retirement"
+}
+
+
+resource "nomad_node_pool" "retirement" {
+  count       = var.client_retirement_node_pool != "" ? 1 : 0
+  name        = var.client_retirement_node_pool
+  description = "Fresh workers running the immutable journal-capable orchestrator."
+}
+
+module "fresh_retirement_orchestrator" {
+  count                      = var.client_retirement_node_pool != "" ? 1 : 0
+  source                     = "../../modules/job-orchestrator"
+  node_pool                  = nomad_node_pool.retirement[0].name
+  port                       = var.orchestrator_port
+  proxy_port                 = var.orchestrator_proxy_port
+  environment                = "${var.environment}-retirement-fresh"
+  artifact_source            = "s3::https://${var.fc_env_pipeline_bucket_name}.s3.${var.aws_region}.amazonaws.com/${var.client_retirement_artifact_key}?etag=${data.aws_s3_object.retirement_orchestrator[0].etag}"
+  orchestrator_checksum      = data.aws_s3_object.retirement_orchestrator[0].etag
+  job_env_vars               = var.orchestrator_env_vars
+  version_constraint_enabled = false
+  job_variable_path          = "nomad/jobs/orchestrator-${var.environment}-retirement-fresh"
+}
+
+output "retirement_node_pool_name" {
+  value = try(nomad_node_pool.retirement[0].name, null)
+  # Worker bootstrap must not target the new pool until its runtime is registered.
+  depends_on = [module.fresh_retirement_orchestrator]
 }
