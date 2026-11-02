@@ -87,7 +87,10 @@ new pool such as `retirement-ready`. Terraform registers the immutable fresh-wor
 job before updating the ASG launch template. Only future instances join that
 pool; existing allocations stay in place. Once this job is registered, fresh-disk
 history initialization can be enabled without trusting legacy binaries. API
-service discovery spans both pools. Continue auditing and migrating old workers
+service discovery spans both pools. Verify that every `orchestrator` service
+registration has a nonempty address, and confirm actual placement on the new
+pool before allowing scale-in. Host health alone does not establish API
+reachability. Continue auditing and migrating old workers
 as they empty; a busy legacy host remains protected indefinitely.
 
 Alternatively, once every legacy allocation has moved, set `CLIENT_ORCHESTRATOR_ARTIFACT_KEY`
@@ -224,3 +227,18 @@ for safe retirement; five legacy workers remain protected and ineligible. All
 seventeen workers subsequently reported healthy capacity, with no pending uploads
 or journal errors on the twelve enrolled workers. These counts describe the
 rollout observation, not fixed deployment capacity.
+
+
+The placement check exposed a pre-existing jobspec error: numeric service ports
+registered empty addresses. Default-pool discovery masked it for old workers,
+but the API ignored the fresh pool. Retirement was returned to dry-run while the
+services were changed to named network ports. Review the Nomad plan for zero
+destructive updates; service registration can be corrected in place without
+restarting the runtime. Do not count a new pool as available capacity merely
+because its hosts and local health endpoints are healthy.
+
+The correction was applied to all three production jobs. Nomad planned seven,
+five, and five in-place service updates respectively, with zero destructive
+updates; running task start times and restart counts were unchanged. Both service
+catalogs then contained seventeen nonempty addresses. Real sandbox placements
+were observed on three fresh-pool workers before retirement was re-enabled.

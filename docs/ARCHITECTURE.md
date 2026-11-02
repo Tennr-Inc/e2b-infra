@@ -655,8 +655,10 @@ ALB or a public endpoint.
   `CLIENT_RETIREMENT_NODE_POOL` registers a separate immutable job and sends only
   future ASG instances to that pool, so long-running legacy sessions can finish
   without delaying guarded scale-out. The launch template depends on that job's
-  registration; API service discovery spans both pools. Existing hosts require
-  a durability audit. See
+  registration; API service discovery spans both pools. Nomad services reference
+  their named network ports, so registrations include the allocated host address.
+  Numeric service ports can produce an empty address and must not be used here.
+  Existing hosts require a durability audit. See
   [the scale-in runbook](aws-safe-scale-in.md) for rollout and recovery.
   Roll out the admission-capable orchestrator with the new bootstrap/reporter and metric policy
   on fresh workers; an older binary has no `/capacity` endpoint. Validate concurrent starts,

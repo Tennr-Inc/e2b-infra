@@ -41,7 +41,9 @@ job "orchestrator-${latest_orchestrator_job_id}" {
 
     service {
       name = "orchestrator"
-      port = "${port}"
+      // Resolve the allocated host address through its network port label.
+      // A numeric port leaves Address empty in Nomad's service catalog.
+      port = "orchestrator"
 
       provider = "nomad"
 
@@ -56,7 +58,7 @@ job "orchestrator-${latest_orchestrator_job_id}" {
 
     service {
       name = "orchestrator-proxy"
-      port = "${proxy_port}"
+      port = "orchestrator-proxy"
 
       provider = "nomad"
 
