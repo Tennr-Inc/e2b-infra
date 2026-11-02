@@ -620,7 +620,8 @@ ALB or a public endpoint.
   a deliberate density tradeoff, not a guarantee against fragmentation. Admission accounting
   does not change lazy page loading or create kernel hugepage reservations. A conservative
   fallback is 24576 MiB and six slots, which fits the current persistent pool with headroom.
-  A systemd timer publishes `E2B/Capacity/SandboxCapacityUtilization` every minute. It takes the
+  A systemd calendar timer publishes `E2B/Capacity/SandboxCapacityUtilization` on
+  clock minutes, avoiding cumulative drift from relative timers. It takes the
   maximum of committed RAM / RAM limit, committed slots / slot limit, used-plus-reserved
   hugepages / (persistent pool minus 2 GiB), and physical memory pressure excluding unused,
   unreserved pool pages. Thus six idle 4 GiB guests already report at least 75%, even with no

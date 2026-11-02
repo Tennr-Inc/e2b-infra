@@ -242,3 +242,16 @@ five, and five in-place service updates respectively, with zero destructive
 updates; running task start times and restart counts were unchanged. Both service
 catalogs then contained seventeen nonempty addresses. Real sandbox placements
 were observed on three fresh-pool workers before retirement was re-enabled.
+
+
+The first scheduled production attempt passed the complete capacity window,
+inspected all seventeen workers through the restricted SSM document, and drained
+one verified host. Its live sandbox prevented sealing. An incomplete metric bucket
+then caused cancellation, reopening admission without stopping that sandbox.
+Reporter journals traced the missing samples to relative systemd timers firing
+about every 61 seconds: four otherwise healthy workers each contributed only four
+samples to one five-minute bucket. The publisher now uses a clock-minute calendar
+timer on current and future workers. Only the reporting timers were restarted;
+no runtime or sandbox was restarted, and the completeness threshold was retained.
+The temporary nine-node floor remains until a successful production retirement
+has been observed. The first attempt validated drain/cancel, not termination.
