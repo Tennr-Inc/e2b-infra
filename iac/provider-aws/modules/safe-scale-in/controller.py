@@ -210,7 +210,10 @@ class Controller:
             node = result[candidate]
             if not (node["ready"] and node["mode"] == "sealed"):
                 raise RuntimeError("missing durable seal proof")
-            if not self.stable(group, state["desired"]) or not self.headroom(group, max(1, len(ids) - 1)):
+            # Once sealed, this host cannot reopen. A later scale-out must not
+            # strand it forever at the old desired count: require the current
+            # fleet to stabilize and pass headroom checks before retiring it.
+            if not self.stable(group) or not self.headroom(group, max(1, len(ids) - 1)):
                 self.emit("scale_in.sealed_waiting_for_headroom", instance=candidate)
                 return
             if self.dry_run:

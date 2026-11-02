@@ -143,7 +143,9 @@ To stop new scale-in actions, set dry-run true or disable the EventBridge rule.
 This does not reopen an already draining/sealed node. An unsealed drain can be
 cancelled through the fixed SSM document's `cancel` action after checking that no
 seal command is still in flight. A sealed node requires completion of the safe
-retirement or a separate audited recovery. Never restore an older orchestrator
+retirement or a separate audited recovery. If scale-out occurs after sealing, the
+controller waits for the current fleet to stabilize and pass its capacity checks;
+it does not remain pinned to the earlier desired count. Never restore an older orchestrator
 that ignores the persistent fence.
 
 ## Verification
@@ -189,7 +191,7 @@ step and is not established by these canary results.
 
 ## Staged production rollout: 2026-11-02
 
-After the canary, four existing workers were enrolled individually. Each was
+After the canary, five existing workers were enrolled individually. Each was
 first put in standby and allowed to finish its sandboxes. While the old process
 was still available, the operator audited cached and node-origin snapshot builds,
 including inherited rootfs/memory dependencies, against S3. Only then was the
@@ -204,12 +206,21 @@ as a historical failure with no host-owned artifacts; it was not marked uploaded
 and no database records were changed. Failed builds are not generally exempt
 from auditing.
 
-The controller is active with a temporary minimum of nine workers, allowing only
-one initial retirement from the ten-worker fleet. A production retirement has
-not yet been observed. Missing capacity samples during manual standby correctly
-block selection; the quiet-window requirement has not been bypassed.
+The controller is active with a temporary minimum of nine workers. A production
+retirement has not yet been observed. Missing capacity samples during manual
+standby correctly block selection; the quiet-window requirement has not been
+bypassed. During migration, reduced available capacity triggered native scale-out
+from ten to seventeen workers. The remaining manual drains were cancelled,
+restoring admission without interrupting their existing sessions.
 
 The launch template now directs future workers to `retirement-ready`, with a
 separate job using the same immutable runtime and fresh-disk journal initialization.
 Existing instances were not replaced. Busy legacy workers retain their original
 runtime and scale-in protection until they can be audited safely.
+
+The seven automatically added workers joined the fresh pool with verified
+journals. Together with the five migrated workers, twelve workers are eligible
+for safe retirement; five legacy workers remain protected and ineligible. All
+seventeen workers subsequently reported healthy capacity, with no pending uploads
+or journal errors on the twelve enrolled workers. These counts describe the
+rollout observation, not fixed deployment capacity.

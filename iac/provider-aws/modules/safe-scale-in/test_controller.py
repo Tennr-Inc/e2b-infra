@@ -82,6 +82,25 @@ class ControllerTests(unittest.TestCase):
         self.run_state()
         self.c.aws.terminate_instance_in_auto_scaling_group.assert_not_called()
 
+    def test_sealed_node_can_retire_after_larger_fleet_stabilizes(self):
+        self.group["DesiredCapacity"] = 4
+        self.group["Instances"].append(dict(
+            InstanceId="d", LifecycleState="InService", HealthStatus="Healthy",
+            ProtectedFromScaleIn=True))
+        self.run_state()
+        self.c.headroom.assert_called_once_with(self.group, 3)
+        self.c.aws.terminate_instance_in_auto_scaling_group.assert_called_once_with(
+            InstanceId="a", ShouldDecrementDesiredCapacity=True)
+
+    def test_larger_fleet_still_requires_headroom_before_termination(self):
+        self.group["DesiredCapacity"] = 4
+        self.group["Instances"].append(dict(
+            InstanceId="d", LifecycleState="InService", HealthStatus="Healthy",
+            ProtectedFromScaleIn=True))
+        self.c.headroom.return_value = False
+        self.run_state()
+        self.c.aws.terminate_instance_in_auto_scaling_group.assert_not_called()
+
     def test_dry_run_cannot_terminate_preexisting_candidate(self):
         self.c.dry_run = True
         self.run_state()
