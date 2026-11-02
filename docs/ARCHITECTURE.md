@@ -641,13 +641,17 @@ ALB or a public endpoint.
   history block removal. The controller waits for natural completion, cancels an
   unsealed drain if demand returns, and requires a persistent sealed admission
   fence plus zero commitments and zero pending uploads before terminating the
-  specific EC2 instance with desired-capacity decrement. Native ASG scale-in and
+  specific EC2 instance with desired-capacity decrement. A 35-minute cooldown
+  after confirmed removal clears historical averages from the larger fleet
+  before another candidate can be selected. Native ASG scale-in and
   protection remain unchanged. Fresh NVMe initialization can establish verified
   history through the separate, default-off `CLIENT_RETIREMENT_HISTORY_ENABLED`
   bootstrap flag after journal-capable jobs are deployed. During rollout, explicit
   `CLIENT_RETIREMENT_NODE_IDS` move audited, empty nodes to a separate immutable
   orchestrator job; the original job excludes those IDs and keeps its current
-  artifact on occupied workers. Existing hosts require
+  artifact on occupied workers. After all legacy allocations have moved,
+  `CLIENT_ORCHESTRATOR_ARTIFACT_KEY` promotes the same immutable binary for fresh
+  workers before fresh-history initialization is enabled. Existing hosts require
   a durability audit. See
   [the scale-in runbook](aws-safe-scale-in.md) for rollout and recovery.
   Roll out the admission-capable orchestrator with the new bootstrap/reporter and metric policy

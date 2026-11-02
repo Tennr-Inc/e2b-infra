@@ -324,3 +324,13 @@ variable "client_retirement_artifact_key" {
   type        = string
   default     = ""
 }
+
+variable "client_orchestrator_artifact_key" {
+  description = "Default worker binary key. Promote an immutable journal-capable key only after legacy allocations are excluded."
+  type        = string
+  default     = "orchestrator"
+  validation {
+    condition     = trimspace(var.client_orchestrator_artifact_key) != ""
+    error_message = "The default orchestrator artifact key must not be empty."
+  }
+}

@@ -392,6 +392,7 @@ module "nomad" {
   client_proxy_repository_name = module.init.client_proxy_repository_name
   client_proxy_env_vars        = local.client_proxy_env_vars
 
+  client_orchestrator_artifact_key    = var.client_orchestrator_artifact_key
   client_retirement_node_ids          = var.client_retirement_node_ids
   client_retirement_artifact_key      = var.client_retirement_artifact_key
   orchestrator_node_pool              = local.client_pool_name

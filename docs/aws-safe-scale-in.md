@@ -31,6 +31,9 @@ sandbox, or treats a timeout as permission to terminate a host.
    capacity decrement enabled. The controller does not separately reduce desired
    capacity or remove protection from other nodes. Persist the candidate until it
    disappears, including after an uncertain AWS response.
+9. Wait 35 minutes after confirmed removal before considering another candidate.
+   This replaces the full metric history with samples from the smaller fleet;
+   repeated removals must not reuse averages collected across more nodes.
 
 The proof covers sandbox data owned by the orchestrator. It does not turn EC2
 hardware failures, manual forced termination, or arbitrary binary downgrades into
@@ -79,6 +82,12 @@ Review the Nomad plan: only that node may have a destructive allocation update.
 Keep these settings in the deployment environment so later applies retain the
 split. New workers continue using the original job until the runtime rollout is
 complete; leave fresh-history initialization off during this mixed phase.
+Once every legacy allocation has moved, set `CLIENT_ORCHESTRATOR_ARTIFACT_KEY`
+to the same immutable key. The original job then serves fresh workers with the
+validated runtime, while enrolled nodes keep their separate job. Verify the
+scheduler plan has no destructive allocation updates before applying this
+promotion, then enable `CLIENT_RETIREMENT_HISTORY_ENABLED` for future blank disks.
+Do not revert either runtime job to a binary that ignores the journal.
 
 Observe a candidate in dry-run, review actual capacity and snapshot obligations,
 then set `CLIENT_SCALE_IN_DRY_RUN=false`. Retire one verified host and validate

@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import Mock, patch
 
-from controller import Controller, validate_node
+from controller import Controller, SCALE_IN_COOLDOWN_SECONDS, validate_node
 
 
 def node(**updates):
@@ -46,9 +46,28 @@ class ControllerTests(unittest.TestCase):
     def test_lost_termination_response_cannot_select_another_victim(self):
         self.group["Instances"] = self.group["Instances"][1:]
         self.group["DesiredCapacity"] = 2
-        self.run_state()
+        with patch("controller.time.time", return_value=1000):
+            self.run_state()
         self.c.aws.terminate_instance_in_auto_scaling_group.assert_not_called()
+        self.c.clear.assert_not_called()
+        self.c.save.assert_called_once_with({"phase": "cooldown", "until": 1000 + SCALE_IN_COOLDOWN_SECONDS})
+
+    def test_cooldown_prevents_reusing_larger_fleet_averages(self):
+        self.state = {"phase": "cooldown", "until": 3100}
+        with patch("controller.time.time", return_value=3099):
+            self.run_state()
+        self.c.command.assert_not_called()
+        self.c.headroom.assert_not_called()
+        self.c.clear.assert_not_called()
+        self.c.aws.terminate_instance_in_auto_scaling_group.assert_not_called()
+
+    def test_expired_cooldown_requires_new_observation(self):
+        self.state = {"phase": "cooldown", "until": 3100}
+        with patch("controller.time.time", return_value=3100):
+            self.run_state()
         self.c.clear.assert_called_once()
+        self.c.command.assert_not_called()
+        self.c.aws.terminate_instance_in_auto_scaling_group.assert_not_called()
 
     def test_never_terminate_without_durable_proof(self):
         for status in (node(), node(mode="draining"), node(mode="draining", pending_uploads=1),

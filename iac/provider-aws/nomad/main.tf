@@ -120,11 +120,11 @@ module "api" {
 
 data "aws_s3_object" "orchestrator" {
   bucket = var.fc_env_pipeline_bucket_name
-  key    = "orchestrator"
+  key    = var.client_orchestrator_artifact_key
 }
 
 locals {
-  orchestrator_artifact_source = "s3::https://${var.fc_env_pipeline_bucket_name}.s3.${var.aws_region}.amazonaws.com/orchestrator?etag=${data.aws_s3_object.orchestrator.etag}"
+  orchestrator_artifact_source = "s3::https://${var.fc_env_pipeline_bucket_name}.s3.${var.aws_region}.amazonaws.com/${var.client_orchestrator_artifact_key}?etag=${data.aws_s3_object.orchestrator.etag}"
 }
 
 module "orchestrator" {

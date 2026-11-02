@@ -12,6 +12,12 @@ import time
 
 import boto3
 
+# Fleet averages from before a removal used a larger denominator. Wait for the
+# entire 30-minute metric window, its two-minute lag, and bucket alignment to
+# clear before choosing another host. Otherwise several quick removals could
+# repeatedly reuse deceptively low historical averages.
+SCALE_IN_COOLDOWN_SECONDS = 35 * 60
+
 
 class Controller:
     def __init__(self, asg, table, document, minimum=2, dry_run=True):
@@ -126,7 +132,13 @@ class Controller:
             # Includes a successful termination whose response was lost. Never
             # compensate by terminating a different node or decrementing twice.
             self.emit("scale_in.candidate_gone", instance=candidate)
-            self.clear()
+            self.save({"phase": "cooldown", "until": time.time() + SCALE_IN_COOLDOWN_SECONDS})
+            return
+        if phase == "cooldown":
+            if time.time() < state["until"]:
+                self.emit("scale_in.waiting_for_fresh_fleet_metrics")
+            else:
+                self.clear()
             return
         if phase == "observe":
             if set(ids) != set(state["ids"]) or not self.stable(group, state["desired"]):
